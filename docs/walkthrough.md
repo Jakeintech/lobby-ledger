@@ -84,3 +84,21 @@ Three SQL files in `app/config/queries/`: `experience_search.sql` (service princ
 - [ADR 0002](adr/0002-apps-read-gold-only.md): apps read Gold only.
 - [ADR 0003](adr/0003-on-behalf-of-user-auth.md): on-behalf-of-user auth for governed queries.
 
+
+## Ten-minute presentation script
+
+**0:00 The question.** "Have we done this before, who did it, and what did we deliver?" Every professional-services firm asks it, and the answer lives in billing, matter and people systems that each change over time. Public lobbying disclosures have the same shape, so I used them as an honest twin: firm, client, timekeeper, practice group, matter, one observation per quarter.
+
+**1:00 The data.** `ingest/pull_lda.py` samples 46 current engagements across four firms and pulls every 2024-2025 filing for each, 245 in all, into five source-shaped CSVs. Nothing is interpreted on the way in.
+
+**2:00 Bronze.** `sql/bronze.sql` lands the CSVs in a Unity Catalog volume and creates `bronze.lda_*` with only two added columns, `load_date` and `record_source`. This is the landing zone a CDC tool would feed.
+
+**3:00 Silver, the Raw Vault.** Open `sql/lakehouse.sql`. Hubs hold one row per business key with an md5 hash key. Links hold relationships: `link_engagement` is the matter. Satellites hold history: `sat_engagement_filing` has one row per quarterly filing, guarded by `hash_diff`. Every insert is `WHERE NOT EXISTS`, so the script is idempotent. Only hard rules live here: cast, trim, upper, hash.
+
+**5:00 The proof.** Run `sql/proof.sql`. Five engagements each have eight satellite rows under one `engagement_hk`. The row count and the distinct `hash_diff` count are both 245, before and after a rerun.
+
+**6:00 Gold, the Business Vault.** `fact_filing` keeps quarterly reports and lets the latest amendment win. `pit_engagement` precomputes which filing was current at every quarter end, so "as of" becomes an equality join. The bridge pre-walks hub-link-hub so the app never touches the vault. `sat_engagement_computed` holds the arguable rules: status, totals. `ai_query()` writes one sentence per engagement, once.
+
+**8:00 The app.** Three SQL files in `app/config/queries`, typed by `pnpm run typegen`, called from React with `useAnalyticsQuery`. Search TAX and "endowment": three university engagements with their teams and summaries. The team query ends in `.obo.sql`, so deployed it runs as the signed-in user and Unity Catalog enforces that person's grants. `experience_search_secure` shows the same idea in SQL with `current_user()`.
+
+**9:30 What is next.** Deploy with user authorization, swap the CSV pull for Lakeflow Connect, show a second load changing a satellite, and move the Gold rules into a tested pipeline.
