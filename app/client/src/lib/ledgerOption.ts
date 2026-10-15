@@ -22,8 +22,10 @@ export interface LedgerOptionInput {
   seriesName: string;
   variant: 'bar' | 'line';
   interactive: boolean;
-  /** False after the first paint, so a re-keyed canvas draws in place. Defaults to true. */
+  /** Plays the entry animation. Defaults to true. */
   animate?: boolean;
+  /** Keeps the value axis on whole numbers, for counts. */
+  integer?: boolean;
   ui: ChartUITokens;
   /** Series colour for money. */
   ledger: string;
@@ -74,10 +76,11 @@ export function changeText(current: number, previous: number | null, compact: (n
  * markLine component is not registered by AppKit's chart bundle.
  */
 export function buildLedgerOption(input: LedgerOptionInput): Record<string, unknown> {
-  const { points, labels, markers, seriesName, variant, interactive, animate = true, ui, ledger, event } = input;
+  const { points, labels, markers, seriesName, variant, interactive, animate = true, integer = false } = input;
+  const { ui, ledger, event } = input;
   const { format, compact } = input;
   const values = points.map((p) => p.value);
-  const scale = niceScale(Math.max(0, ...values));
+  const scale = niceScale(Math.max(0, ...values), 4, { integer });
   const ordinals = points.map((p) => quarterOrdinal(p.period_end_date));
   const placed = markers.flatMap((marker, i) => {
     const slot = ordinals.indexOf(quarterOrdinal(marker.date));

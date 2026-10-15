@@ -3,12 +3,14 @@ import type { ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { sql } from '@databricks/appkit-ui/js';
 import { useAnalyticsQuery } from '@databricks/appkit-ui/react';
+import { SLICE_NOTE } from '@/components/Layout';
 import { PageState } from '@/components/PageState';
 import { StatTiles } from '@/components/StatTiles';
 import type { StatTile } from '@/components/StatTiles';
 import { count, quarterLabel, toNumber } from '@/lib/format';
 import { spanText } from '@/lib/ledger';
 import { usePageTitle } from '@/lib/usePageTitle';
+import { Affiliations } from '@/pages/Lobbyist/Affiliations';
 import { CoveredPositions } from '@/pages/Lobbyist/CoveredPositions';
 import { dedupePositions } from '@/pages/Lobbyist/positions';
 import { EngagementTimeline } from '@/pages/Lobbyist/EngagementTimeline';
@@ -41,7 +43,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-const SLICE_NOTE = 'The data covers every registrant and client pair with a $500,000 filing in 2024 or 2025.';
 const formatCount = (n: number) => count(n);
 
 /** Lobbyist page: who they lobbied for and through, the quarters they were listed, and any covered positions disclosed. */
@@ -62,6 +63,7 @@ function LobbyistBody({ id, onRetry }: { id: string; onRetry: () => void }) {
   const params = useMemo(() => ({ id: sql.string(id) }), [id]);
   const detail = useAnalyticsQuery('lobbyist_detail', params);
   const positions = useAnalyticsQuery('lobbyist_positions', params);
+  const affiliations = useAnalyticsQuery('lobbyist_affiliations', params);
   const engagements = useAnalyticsQuery('lobbyist_engagements', params);
 
   const lobbyist = detail.data?.[0];
@@ -132,7 +134,7 @@ function LobbyistBody({ id, onRetry }: { id: string; onRetry: () => void }) {
         {lobbyist && (
           <header className="space-y-4">
             <div className="space-y-1">
-              <h1 className="text-3xl tracking-tight">{lobbyist.full_name}</h1>
+              <h1 className="text-3xl sm:text-4xl">{lobbyist.full_name}</h1>
               <p className="text-muted-foreground">
                 A lobbyist named on Lobbying Disclosure Act quarterly reports for{' '}
                 {count(lobbyist.client_count) === '1' ? 'one client' : `${count(lobbyist.client_count)} clients`}
@@ -154,6 +156,15 @@ function LobbyistBody({ id, onRetry }: { id: string; onRetry: () => void }) {
             onRetry={onRetry}
           >
             <CoveredPositions positions={positionList} lobbyistName={name} />
+          </PageState>
+          <PageState
+            loading={affiliations.loading}
+            error={affiliations.error}
+            empty={false}
+            emptyMessage=""
+            onRetry={onRetry}
+          >
+            <Affiliations rows={affiliations.data ?? []} lobbyistName={name} hasPositions={positionList.length > 0} />
           </PageState>
         </Section>
       )}

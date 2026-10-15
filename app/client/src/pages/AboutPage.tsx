@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { usePageTitle } from '@/lib/usePageTitle';
+import { SLICE_NOTE } from '@/components/Layout';
 import { HOME_PATH } from '@/lib/routes';
+import { usePageTitle } from '@/lib/usePageTitle';
 import { DataFreshness } from '@/pages/About/DataFreshness';
 import { RetrySection } from '@/pages/Home/RetrySection';
+import { LINK_CLASS } from '@/components/EntityLink';
 
 /** When the filings were last pulled from the LDA API. Keep in step with FRESHNESS in App.tsx. */
 const PULLED_ON = '15 October 2026';
@@ -11,7 +13,7 @@ const SOURCE_URL = 'https://lda.senate.gov/api/';
 const REPO_URL = 'https://github.com/Jakeintech/lobby-ledger';
 
 const DIAGRAM = `LDA API (lda.senate.gov)
-   |  ingest/pull_lda.py      every firm and client pair with a $500,000 filing in 2024 or 2025
+   |  ingest/pull_lda.py      every quarterly report and registration filed for 2024 and 2025
    v
 BRONZE   bronze.lda_*         source-shaped CSV to Delta, plus load_date and record_source
    |  sql/lakehouse.sql       hard rules only: cast, trim, upper, md5, WHERE NOT EXISTS
@@ -26,8 +28,6 @@ GOLD     one mart per page    topic, topic_quarter, bill, bill_quarter, client, 
    |  SQL warehouse + Unity Catalog, one read-only identity per host
    v
 APP      config/queries/*.sql one file per page section -> /api/analytics/query/<name> -> React`;
-
-const LINK_CLASS = 'font-medium text-primary underline-offset-4 hover:underline';
 
 /**
  * One note: the heading sits in the left column at desktop width and above
@@ -56,8 +56,8 @@ export function AboutPage() {
       <header className="max-w-2xl space-y-2 pt-6">
         <h1 className="text-3xl sm:text-4xl">About the data</h1>
         <p className="text-lg text-muted-foreground">
-          Where the filings come from, what reported income and a quarter mean, why topic totals overlap, how the slice
-          was chosen, and how the summaries are produced.
+          Where the filings come from, what reported income and a quarter mean, why topic totals overlap, what the data
+          covers, and how the summaries are produced.
         </p>
       </header>
 
@@ -111,14 +111,13 @@ export function AboutPage() {
         </p>
       </Note>
 
-      <Note id="slice" title="The $500,000 slice">
+      <Note id="scope" title="What the data covers">
         <p>
-          The data is a slice, not the whole database. It holds every firm and client pair that reported at least
-          $500,000 of income on a single quarterly filing in 2024 or 2025, together with that pair&rsquo;s complete 2024
-          to 2025 filing history, including the quarters below the threshold, registrations, amendments and
-          terminations. Pairs that never crossed $500,000 in one quarter are not included, so a client or firm absent
-          from search may still lobby; it just did so below that level. Years before 2024, foreign entities and
-          affiliated organizations are out of scope.
+          {SLICE_NOTE} That includes every quarterly report, registration, amendment and termination for those two
+          years, whatever the income, so a client or firm absent from search did not file in 2024 or 2025. Years before
+          2024 are out of scope. The filings load first; bill records from Congress.gov, the foreign entities that fund
+          clients and the government entities the filings list as contacted load after them, so the bills, foreign and
+          lobbied pages fill in last and say so while they are empty.
         </p>
       </Note>
 

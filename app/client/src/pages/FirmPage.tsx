@@ -5,6 +5,7 @@ import { sql } from '@databricks/appkit-ui/js';
 import { useAnalyticsQuery } from '@databricks/appkit-ui/react';
 import { EngagementTable } from '@/components/EngagementTable';
 import { EntityLink } from '@/components/EntityLink';
+import { SLICE_NOTE } from '@/components/Layout';
 import { PageState } from '@/components/PageState';
 import { QuarterChart } from '@/components/QuarterChart';
 import { RankedBars } from '@/components/RankedBars';
@@ -81,7 +82,6 @@ function sentence(text: string | null | undefined): string {
   return /[.!?]$/.test(trimmed) ? ` ${trimmed}` : ` ${trimmed}.`;
 }
 
-const SLICE_NOTE = 'The data covers every registrant and client pair with a $500,000 filing in 2024 or 2025.';
 const formatMoney = (n: number) => money(n);
 
 /** Firm page: income by quarter across all clients, the clients ranked, and the roster of lobbyists. */

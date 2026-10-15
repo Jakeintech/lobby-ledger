@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BaseChart, Button, Slider, cn, useChartUITokens, useThemeColors } from '@databricks/appkit-ui/react';
+import { useCallback, useMemo, useState } from 'react';
+import { BaseChart, Button, useChartUITokens, useThemeColors } from '@databricks/appkit-ui/react';
 import type { ChartClickDatum } from '@databricks/appkit-ui/react';
+import { QuarterButtons } from '@/components/QuarterChart/QuarterButtons';
+import { ZoomSlider } from '@/components/QuarterChart/ZoomSlider';
 import { count, money, quarterLabel, toNumber } from '@/lib/format';
-import { LEDGER_GRID, buildLedgerOption } from '@/lib/ledgerOption';
-import { useWidth } from '@/lib/useWidth';
+import { buildLedgerOption } from '@/lib/ledgerOption';
 
 export interface QuarterRow {
   /** Quarter end date as ISO text, for example `2024-03-31`. */
@@ -41,120 +42,15 @@ export interface QuarterChartProps {
 
 const X_KEY = 'Quarter';
 
-interface QuarterButtonsProps {
-  points: QuarterRow[];
-  labels: string[];
-  selected: string | null;
-  onSelect?: (periodEndDate: string | null) => void;
-  format: (n: number) => string;
-}
-
-/** The x-axis, drawn in HTML so every quarter is a real button for keyboards and screen readers. */
-function QuarterButtons({ points, labels, selected, onSelect, format }: QuarterButtonsProps) {
-  return (
-    <div
-      role="group"
-      aria-label={onSelect ? 'Select a quarter' : 'Quarters'}
-      className="grid"
-      style={{
-        paddingLeft: LEDGER_GRID.left,
-        paddingRight: LEDGER_GRID.right,
-        gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))`,
-      }}
-    >
-      {points.map((row, i) => {
-        const [q, year] = labels[i].split(' ');
-        const isSelected = selected === row.period_end_date;
-        const showYear = i === 0 || q === 'Q1';
-        const className = cn(
-          'flex min-w-0 flex-col items-center rounded-sm py-1 text-xs leading-tight',
-          isSelected ? 'font-semibold text-foreground' : 'text-muted-foreground'
-        );
-        const body = (
-          <>
-            <span className={cn(isSelected && 'underline decoration-2 underline-offset-4')}>{q}</span>
-            <span className={cn('text-[10px]', !showYear && 'invisible')}>{year}</span>
-          </>
-        );
-        return onSelect ? (
-          <button
-            key={row.period_end_date}
-            type="button"
-            aria-pressed={isSelected}
-            aria-label={`${labels[i]}, ${format(row.value)}`}
-            onClick={() => onSelect(isSelected ? null : row.period_end_date)}
-            className={cn(className, 'hover:text-foreground')}
-          >
-            {body}
-          </button>
-        ) : (
-          <span key={row.period_end_date} className={className} aria-label={labels[i]}>
-            {body}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-const THUMB_LABELS = ['First quarter shown', 'Last quarter shown'] as const;
-
-interface ZoomSliderProps {
-  range: [number, number];
-  max: number;
-  allLabels: string[];
-  onChange: (next: number[]) => void;
-}
-
-/**
- * The range control, drawn across the plot so it reads as part of the axis.
- * ECharts dataZoom cannot be used here: AppKit's chart bundle registers no
- * DataZoomComponent (nor MarkLine), so a Radix Slider over the same grid
- * margins is the escape hatch. AppKit's Slider names no thumb props, so the
- * thumbs are labelled after render.
- */
-function ZoomSlider({ range, max, allLabels, onChange }: ZoomSliderProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    // Radix names the thumbs Minimum and Maximum on a render after mount, so
-    // the labels are re-applied whenever it writes one; a write only happens
-    // on a difference, which stops the observer feeding itself.
-    const apply = () => {
-      node.querySelectorAll<HTMLElement>('[role="slider"]').forEach((thumb, i) => {
-        const label = THUMB_LABELS[i] ?? '';
-        const text = allLabels[range[i] ?? 0] ?? '';
-        if (thumb.getAttribute('aria-label') !== label) thumb.setAttribute('aria-label', label);
-        if (thumb.getAttribute('aria-valuetext') !== text) thumb.setAttribute('aria-valuetext', text);
-      });
-    };
-    apply();
-    const observer = new MutationObserver(apply);
-    observer.observe(node, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label'] });
-    return () => observer.disconnect();
-  }, [range, allLabels]);
-  return (
-    <div
-      ref={ref}
-      role="group"
-      aria-label="Quarters shown"
-      className="mt-2"
-      style={{ paddingLeft: LEDGER_GRID.left, paddingRight: LEDGER_GRID.right }}
-    >
-      <Slider value={range} min={0} max={max} step={1} onValueChange={onChange} className="w-full" />
-    </div>
-  );
-}
-
 /**
  * The interactive ledger at the centre of every page: one bar per quarter end.
  * Hover shows the exact figure, the quarter and the change on the prior
  * quarter; clicking a bar selects that quarter so the page can filter its
  * table; milestones are amber markers on the same axis; `zoom` adds a range
  * control. Rendered with BaseChart and an option from buildCartesianOption.
- * The canvas is keyed on the figure's measured width so it re-lays out in
- * the same frame as the HTML axis under it.
+ * The canvas resizes in place (echarts-for-react watches its container), so
+ * a width change never unmounts the plot; the HTML axis under it shares the
+ * same grid margins and so stays aligned without a measured width.
  */
 export function QuarterChart({
   title,
@@ -177,11 +73,6 @@ export function QuarterChart({
   const ledger = palette[0];
   const event = palette[1] ?? palette[0];
   const interactive = Boolean(onSelect);
-  const [ref, width] = useWidth<HTMLElement>();
-  // The entry animation plays at the first measured width only; a resize re-keys the canvas and draws at once.
-  const [firstWidth, setFirstWidth] = useState(0);
-  if (width > 0 && firstWidth === 0) setFirstWidth(width);
-  const animate = firstWidth === 0 || width === firstWidth;
 
   const sorted = useMemo(
     () =>
@@ -227,14 +118,14 @@ export function QuarterChart({
         seriesName,
         variant,
         interactive,
-        animate,
+        integer: unit === 'count',
         ui,
         ledger,
         event,
         format,
         compact,
       }),
-    [points, labels, markers, seriesName, variant, interactive, animate, ui, ledger, event, format, compact]
+    [points, labels, markers, seriesName, variant, interactive, unit, ui, ledger, event, format, compact]
   );
 
   const onDataClick = useCallback(
@@ -258,7 +149,7 @@ export function QuarterChart({
           : '';
 
   return (
-    <figure ref={ref} className="min-w-0">
+    <figure className="min-w-0">
       <figcaption className="border-t border-border pt-3">
         <p className="font-medium text-foreground">{title}</p>
         <p className="text-sm text-muted-foreground">{note}</p>
@@ -268,20 +159,17 @@ export function QuarterChart({
       ) : (
         <>
           <div role="img" aria-label={`${title}. ${note}`} className="mt-3" style={{ height }}>
-            {width > 0 && (
-              <BaseChart
-                key={width}
-                data={data}
-                chartType={variant}
-                xKey={X_KEY}
-                yKey={seriesName}
-                height={height}
-                showLegend={false}
-                options={option}
-                selected={selectedLabel}
-                onDataClick={interactive ? onDataClick : undefined}
-              />
-            )}
+            <BaseChart
+              data={data}
+              chartType={variant}
+              xKey={X_KEY}
+              yKey={seriesName}
+              height={height}
+              showLegend={false}
+              options={option}
+              selected={selectedLabel}
+              onDataClick={interactive ? onDataClick : undefined}
+            />
           </div>
           <QuarterButtons points={points} labels={labels} selected={selected} onSelect={onSelect} format={format} />
           {zoom && sorted.length > 1 && (

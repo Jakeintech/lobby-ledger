@@ -3,6 +3,7 @@ import {
   QUARTER_ENDS,
   escapeHtml,
   niceScale,
+  padQuarters,
   quarterEndOf,
   quarterFraction,
   quarterIndex,
@@ -71,6 +72,44 @@ describe('niceScale', () => {
   it('handles zero and junk', () => {
     expect(niceScale(0)).toEqual({ max: 4, interval: 1 });
     expect(niceScale(Number.NaN)).toEqual({ max: 4, interval: 1 });
+  });
+
+  it('keeps count axes on whole numbers', () => {
+    expect(niceScale(8, 4, { integer: true })).toEqual({ max: 8, interval: 2 });
+    expect(niceScale(9, 4, { integer: true })).toEqual({ max: 12, interval: 3 });
+    expect(niceScale(13, 4, { integer: true })).toEqual({ max: 20, interval: 5 });
+    expect(niceScale(2, 4, { integer: true })).toEqual({ max: 4, interval: 1 });
+    expect(niceScale(9, 4).interval).toBe(2.5);
+  });
+});
+
+describe('padQuarters', () => {
+  const key = (row: { q: string; n: number }) => row.q;
+  const value = (row: { q: string; n: number }) => row.n;
+
+  it('fills every quarter in order with 0 for the missing ones', () => {
+    const padded = padQuarters(
+      [
+        { q: '2025-09-30', n: 3 },
+        { q: '2025-03-31', n: 1 },
+      ],
+      key,
+      value
+    );
+    expect(padded.map((row) => row.period_end_date)).toEqual(QUARTER_ENDS);
+    expect(padded.map((row) => row.value)).toEqual([0, 0, 0, 0, 1, 0, 3, 0]);
+  });
+
+  it('drops rows outside the period and places any date in its quarter', () => {
+    const padded = padQuarters(
+      [
+        { q: '2023-12-31', n: 9 },
+        { q: '2024-05-02T00:00:00Z', n: 2 },
+      ],
+      key,
+      value
+    );
+    expect(padded.map((row) => row.value)).toEqual([0, 2, 0, 0, 0, 0, 0, 0]);
   });
 });
 

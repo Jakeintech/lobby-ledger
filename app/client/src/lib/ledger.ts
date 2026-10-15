@@ -75,17 +75,54 @@ export function spanIncludes(first: string | null, last: string | null, date: st
   return q >= Math.min(a, b) && q <= Math.max(a, b);
 }
 
+export interface NiceScaleOptions {
+  /** Keep every tick a whole number, for counts: no 2.5 multiples and no interval below 1. */
+  integer?: boolean;
+}
+
 /**
  * A value-axis ceiling with round ticks: the smallest 1, 2, 2.5 or 5 multiple
  * of a power of ten whose `ticks` steps clear `max` with a little headroom.
+ * With `integer` the ticks stay whole numbers: 1, 2, 3 or 5 multiples, an
+ * interval of at least 1, and no headroom, so a count of 8 tops out at 8.
  */
-export function niceScale(max: number, ticks = 4): { max: number; interval: number } {
+export function niceScale(max: number, ticks = 4, options: NiceScaleOptions = {}): { max: number; interval: number } {
   if (!Number.isFinite(max) || max <= 0) return { max: ticks, interval: 1 };
   const rawStep = (max * 1.08) / ticks;
   const power = 10 ** Math.floor(Math.log10(rawStep));
-  const candidates = [1, 2, 2.5, 5, 10].map((m) => m * power);
-  const interval = candidates.find((step) => step * ticks >= max * 1.04) ?? candidates[candidates.length - 1];
+  const multiples = options.integer ? [1, 2, 3, 5, 10] : [1, 2, 2.5, 5, 10];
+  const candidates = multiples.map((m) => m * power).filter((step) => !options.integer || step >= 1);
+  const steps = candidates.length > 0 ? candidates : [1];
+  const target = options.integer ? max : max * 1.04;
+  const interval = steps.find((step) => step * ticks >= target) ?? steps[steps.length - 1];
   return { max: interval * ticks, interval };
+}
+
+export interface QuarterValue {
+  period_end_date: string;
+  value: number;
+}
+
+/**
+ * One value per quarter end in {@link QUARTER_ENDS}, in order, with 0 for any
+ * quarter the rows leave out. Queries that count mentions return no row for
+ * a quarter with none, so a chart drawn straight from them would shrink its
+ * axis or hide a gap; padding keeps every ledger on the same eight quarters.
+ */
+export function padQuarters<T>(
+  rows: ReadonlyArray<T>,
+  key: (row: T) => string,
+  value: (row: T) => number
+): QuarterValue[] {
+  const byQuarter = new Map<string, T>();
+  for (const row of rows) {
+    const end = quarterEndOf(key(row));
+    if (end) byQuarter.set(end, row);
+  }
+  return QUARTER_ENDS.map((end) => {
+    const row = byQuarter.get(end);
+    return { period_end_date: end, value: row === undefined ? 0 : value(row) };
+  });
 }
 
 /** Escapes text for an HTML string, as ECharts tooltip formatters return markup. */

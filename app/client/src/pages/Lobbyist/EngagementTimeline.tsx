@@ -99,10 +99,10 @@ export function EngagementTimeline({ rows, lobbyistName }: { rows: LobbyistEngag
               const span = spanText(row.first_period, row.last_period, quarterLabel);
               return (
                 <TableRow key={row.engagement_hk}>
-                  <TableCell className="min-w-48 max-w-64 whitespace-normal align-top">
+                  <TableCell className="max-w-64 whitespace-normal align-top sm:min-w-48">
                     <EntityLink kind="client" id={row.client_id} name={row.client} />
                   </TableCell>
-                  <TableCell className="hidden min-w-40 max-w-56 whitespace-normal align-top md:table-cell">
+                  <TableCell className="hidden max-w-56 whitespace-normal align-top md:table-cell md:min-w-40">
                     <EntityLink kind="firm" id={row.registrant_id} name={row.firm} />
                   </TableCell>
                   <TableCell className="align-top whitespace-nowrap">

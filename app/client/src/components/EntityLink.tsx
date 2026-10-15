@@ -14,6 +14,9 @@ export interface EntityLinkProps {
   className?: string;
 }
 
+/** The one link style for names and actions in running text and tables; EntityLink adds the focus ring. */
+export const LINK_CLASS = 'font-medium text-primary underline-offset-4 hover:underline';
+
 const PATH_BUILDERS: Record<EntityKind, (id: string) => string> = {
   topic: topicPath,
   bill: billPath,
@@ -32,10 +35,7 @@ export function EntityLink({ kind, id, name, className }: EntityLinkProps) {
   return (
     <Link
       to={PATH_BUILDERS[kind](key)}
-      className={cn(
-        'font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring',
-        className
-      )}
+      className={cn(LINK_CLASS, 'focus-visible:outline-2 focus-visible:outline-ring', className)}
     >
       {text}
     </Link>
