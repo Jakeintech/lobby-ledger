@@ -336,14 +336,9 @@ GROUP BY engagement_hk, bill_key;
 CREATE TABLE IF NOT EXISTS gold.engagement_ai_summary (
   engagement_hk STRING, ai_summary STRING, model STRING, load_date TIMESTAMP);
 
-INSERT INTO gold.engagement_ai_summary
-SELECT t.engagement_hk,
-       ai_query('${AI_ENDPOINT}',
-         concat('In one plain sentence of at most 30 words, summarize what this lobbying engagement was about. ',
-                'Issue codes: ', t.issue_codes, '. Filing text: ', t.issues_text)),
-       '${AI_ENDPOINT}', current_timestamp()
-FROM gold.engagement_issue_text t
-WHERE NOT EXISTS (SELECT 1 FROM gold.engagement_ai_summary s WHERE s.engagement_hk = t.engagement_hk);
+-- AI summaries are not computed in the build for now. To fill the table for a
+-- subset later, run the statement in sql/ai_summaries.sql.
+
 
 -- =====================================================================
 -- GOLD: MARTS, ONE PER PAGE
