@@ -1,6 +1,6 @@
 @import '@databricks/appkit-ui/styles.css';
 
-/* Brand accent: a saturated blue primary so the current step, picks and progress read as one system. */
+/* Brand accent: a saturated blue primary so links, buttons and the focus ring read as one system. */
 :root {
   --primary: oklch(0.52 0.19 262);
   --primary-foreground: oklch(0.99 0 0);
@@ -21,33 +21,14 @@
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  @layer utilities {
-    .fade-up {
-      animation: fade-up 200ms ease-out both;
-    }
-    .check-pop {
-      animation: check-pop 250ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-    }
-  }
+/* Long organization names and URLs wrap instead of widening the page at phone width. */
+html,
+body {
+  overflow-x: clip;
+}
 
-  @keyframes fade-up {
-    from {
-      opacity: 0;
-      transform: translateY(4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes check-pop {
-    from {
-      transform: scale(0.6);
-    }
-    to {
-      transform: scale(1);
-    }
+@layer base {
+  body {
+    overflow-wrap: anywhere;
   }
 }
