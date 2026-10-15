@@ -30,7 +30,7 @@ YEARS = [2024, 2025]
 PAGE_SIZE = 25  # the API caps pages at 25 rows
 API_KEY = os.environ.get("LDA_API_KEY", "").strip()
 SLEEP_SECONDS = 2.0 if API_KEY else 4.0
-WORKERS = 4 if API_KEY else 1  # 4 workers x 2s sleep stays under the 120 requests per minute limit
+WORKERS = 7 if API_KEY else 1  # 7 workers x (2s sleep + ~1.7s latency) stays under 120 requests per minute
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
