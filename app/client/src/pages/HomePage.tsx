@@ -1,17 +1,38 @@
+import { useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { SearchBox } from '@/components/SearchBox';
+import { Search } from 'lucide-react';
+import { useSearchPalette } from '@/components/searchPalette';
 import { normalizeBillKey } from '@/lib/format';
+import { isApplePlatform } from '@/lib/platform';
 import { ABOUT_PATH, billPath } from '@/lib/routes';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { IncomeOverview } from '@/pages/Home/IncomeOverview';
 import { RetrySection } from '@/pages/Home/RetrySection';
 import { SearchResults } from '@/pages/Home/SearchResults';
-import { TopicTiles } from '@/pages/Home/TopicTiles';
+import { TopicOverview } from '@/pages/Home/TopicOverview';
+
+/** A search field in appearance, a button in fact: it opens the palette, which does the searching. */
+function PaletteTrigger() {
+  const [apple] = useState(isApplePlatform);
+  const { open } = useSearchPalette();
+  return (
+    <button
+      type="button"
+      onClick={open}
+      aria-label="Search bills, clients and firms"
+      aria-keyshortcuts={apple ? 'Meta+K' : 'Control+K'}
+      className="flex h-12 w-full items-center gap-3 rounded-md border border-input bg-background px-4 text-base text-muted-foreground hover:border-ring hover:text-foreground"
+    >
+      <Search className="size-5 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-left">Bill number, client or firm</span>
+    </button>
+  );
+}
 
 /**
- * Home: a large search box, search results when the URL carries `?q=`,
- * total reported income by quarter, issue areas ranked by income, and three
- * sentences on what the data is and is not.
+ * Home: the search trigger, search results when the URL carries `?q=`, total
+ * reported income by quarter, issue areas as a heatmap and a ranked list, and
+ * one paragraph on what the data is and is not.
  */
 export function HomePage() {
   const [searchParams] = useSearchParams();
@@ -23,42 +44,41 @@ export function HomePage() {
   if (billKey) return <Navigate to={billPath(billKey)} replace />;
 
   return (
-    <div className="space-y-10">
-      <section aria-labelledby="home-heading" className="mx-auto max-w-2xl space-y-4 pt-4">
-        <h1 id="home-heading" className="text-3xl font-semibold tracking-tight">
-          Who lobbies Congress
-        </h1>
-        <p className="text-muted-foreground">
-          Start with a bill number such as H.R. 1, or the name of a client or lobbying firm. Every name on every page is
-          a link.
+    <div className="space-y-12">
+      <section aria-labelledby="home-heading" className="max-w-2xl space-y-5 pt-6">
+        <div className="space-y-2">
+          <h1 id="home-heading" className="text-4xl sm:text-5xl">
+            Who lobbies Congress
+          </h1>
+          <p className="text-lg text-muted-foreground">
+            Who pays, who is paid, on what, and for how much, quarter by quarter, from the filings firms make under the
+            Lobbying Disclosure Act.
+          </p>
+        </div>
+        <PaletteTrigger />
+        <p className="text-sm text-muted-foreground">
+          Try a bill number such as H.R. 1, or part of a name such as Chamber. Every name on every page is a link.
         </p>
-        <SearchBox key={q} size="large" initialValue={q} />
       </section>
 
       {q && <RetrySection>{(retry) => <SearchResults key={q} q={q} onRetry={retry} />}</RetrySection>}
 
-      <section aria-labelledby="income-heading" className="space-y-3">
-        <h2 id="income-heading" className="text-lg font-semibold tracking-tight">
+      <section aria-labelledby="income-heading" className="space-y-4">
+        <h2 id="income-heading" className="text-xl font-semibold tracking-tight">
           Reported income across every engagement
         </h2>
         <RetrySection>{(retry) => <IncomeOverview onRetry={retry} />}</RetrySection>
       </section>
 
-      <section aria-labelledby="topics-heading" className="space-y-3">
-        <div className="space-y-1">
-          <h2 id="topics-heading" className="text-lg font-semibold tracking-tight">
-            Issue areas ranked by reported income
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Reported income in U.S. dollars, 2024 to 2025. A filing counts toward every issue it lists, so these figures
-            overlap and are not summed.
-          </p>
-        </div>
-        <RetrySection>{(retry) => <TopicTiles onRetry={retry} />}</RetrySection>
+      <section aria-labelledby="topics-heading" className="space-y-4">
+        <h2 id="topics-heading" className="text-xl font-semibold tracking-tight">
+          Where the money goes, by issue area
+        </h2>
+        <RetrySection>{(retry) => <TopicOverview onRetry={retry} />}</RetrySection>
       </section>
 
-      <section aria-labelledby="data-heading" className="max-w-3xl space-y-3">
-        <h2 id="data-heading" className="text-lg font-semibold tracking-tight">
+      <section aria-labelledby="data-heading" className="max-w-3xl space-y-3 border-t border-border pt-6">
+        <h2 id="data-heading" className="text-xl font-semibold tracking-tight">
           What this data is
         </h2>
         <p className="text-muted-foreground">
@@ -70,10 +90,7 @@ export function HomePage() {
           language model from the filing text and are a starting point, not a substitute for the filing itself.
         </p>
         <p>
-          <Link
-            to={ABOUT_PATH}
-            className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-          >
+          <Link to={ABOUT_PATH} className="font-medium text-primary underline-offset-4 hover:underline">
             Read more about the data
           </Link>
         </p>

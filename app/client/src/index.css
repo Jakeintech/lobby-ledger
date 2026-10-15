@@ -1,23 +1,168 @@
 @import '@databricks/appkit-ui/styles.css';
 
-/* Brand accent: a saturated blue primary so links, buttons and the focus ring read as one system. */
-:root {
-  --primary: oklch(0.52 0.19 262);
-  --primary-foreground: oklch(0.99 0 0);
-  --ring: oklch(0.62 0.17 262);
+/*
+ * Lobby Ledger tokens. Two data hues only: --ledger for money, --event for
+ * milestones and surges. Everything else is ink, slate and a grid grey. The
+ * AppKit semantic tokens are mapped onto these rather than set separately, so
+ * links, focus rings, chart series one and the heatmap ramp all read as one
+ * system in both color schemes. The heatmap ramp is written as literal hex
+ * because ECharts reads the variables itself and cannot parse color-mix().
+ */
+@theme {
+  --font-sans: 'Public Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Newsreader', ui-serif, Georgia, 'Times New Roman', serif;
 }
 
+:root {
+  --ledger: #1f4fd8;
+  --event: #c8841b;
+  --ink: #14213d;
+  --slate: #5b6472;
+  --grid: #e6e8ec;
+
+  --background: #ffffff;
+  --foreground: var(--ink);
+  --card: #ffffff;
+  --card-foreground: var(--ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: var(--ledger);
+  --primary-foreground: #ffffff;
+  --secondary: #f3f4f7;
+  --secondary-foreground: var(--ink);
+  --muted: #f3f4f7;
+  --muted-foreground: var(--slate);
+  --accent: #eef2fc;
+  --accent-foreground: var(--ink);
+  --warning: var(--event);
+  --warning-foreground: #ffffff;
+  --border: var(--grid);
+  --input: var(--grid);
+  --ring: var(--ledger);
+
+  --chart-cat-1: var(--ledger);
+  --chart-cat-2: var(--event);
+  --chart-cat-3: #7d93e8;
+  --chart-cat-4: #e0b36a;
+  --chart-cat-5: #3d6ae0;
+  --chart-cat-6: #a88442;
+  --chart-cat-7: #b4c2f0;
+  --chart-cat-8: #ecd3a8;
+  --chart-seq-1: #e9edfb;
+  --chart-seq-2: #ced8f6;
+  --chart-seq-3: #b1c1f1;
+  --chart-seq-4: #93abec;
+  --chart-seq-5: #7492e7;
+  --chart-seq-6: #5579e1;
+  --chart-seq-7: #3561dc;
+  --chart-seq-8: var(--ledger);
+  --chart-axis-label: var(--slate);
+  --chart-axis-title: var(--ink);
+  --chart-grid: var(--grid);
+  --chart-tooltip-bg: #ffffff;
+}
+
+/*
+ * Dark scheme: the same two hues on a navy page. The ledger blue lifts to
+ * #5f82ec (about 5:1 on the page) so every money mark, from the line to the
+ * sparkline cells and the treemap mix, clears the graphics minimum; the
+ * amber is already 6:1 and stays.
+ */
 .dark {
-  --primary: oklch(0.72 0.16 262);
-  --primary-foreground: oklch(0.18 0.02 262);
-  --ring: oklch(0.62 0.17 262);
+  --ledger: #5f82ec;
+  --ink: #e8ecf4;
+  --slate: #9aa3b5;
+  --grid: #273045;
+
+  --background: #0f1420;
+  --foreground: var(--ink);
+  --card: #141a2a;
+  --card-foreground: var(--ink);
+  --popover: #141a2a;
+  --popover-foreground: var(--ink);
+  --primary: #8fa8f2;
+  --primary-foreground: #0f1420;
+  --secondary: #1b2234;
+  --secondary-foreground: var(--ink);
+  --muted: #1b2234;
+  --muted-foreground: var(--slate);
+  --accent: #1c2640;
+  --accent-foreground: var(--ink);
+  --warning: var(--event);
+  --warning-foreground: #0f1420;
+  --border: var(--grid);
+  --input: var(--grid);
+  --ring: #8fa8f2;
+
+  --chart-cat-1: var(--ledger);
+  --chart-cat-2: var(--event);
+  --chart-cat-3: #7d93e8;
+  --chart-cat-4: #e0b36a;
+  --chart-cat-5: #3d6ae0;
+  --chart-cat-6: #a88442;
+  --chart-cat-7: #b4c2f0;
+  --chart-cat-8: #ecd3a8;
+  --chart-seq-1: #111b36;
+  --chart-seq-2: #13224c;
+  --chart-seq-3: #152962;
+  --chart-seq-4: #17327c;
+  --chart-seq-5: #193a96;
+  --chart-seq-6: #1b42b0;
+  --chart-seq-7: #1d49c6;
+  --chart-seq-8: #5f82ec;
+  --chart-axis-label: var(--slate);
+  --chart-axis-title: var(--ink);
+  --chart-grid: var(--grid);
+  --chart-tooltip-bg: #141a2a;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
-    --primary: oklch(0.72 0.16 262);
-    --primary-foreground: oklch(0.18 0.02 262);
-    --ring: oklch(0.62 0.17 262);
+    --ledger: #5f82ec;
+    --ink: #e8ecf4;
+    --slate: #9aa3b5;
+    --grid: #273045;
+
+    --background: #0f1420;
+    --foreground: var(--ink);
+    --card: #141a2a;
+    --card-foreground: var(--ink);
+    --popover: #141a2a;
+    --popover-foreground: var(--ink);
+    --primary: #8fa8f2;
+    --primary-foreground: #0f1420;
+    --secondary: #1b2234;
+    --secondary-foreground: var(--ink);
+    --muted: #1b2234;
+    --muted-foreground: var(--slate);
+    --accent: #1c2640;
+    --accent-foreground: var(--ink);
+    --warning: var(--event);
+    --warning-foreground: #0f1420;
+    --border: var(--grid);
+    --input: var(--grid);
+    --ring: #8fa8f2;
+
+    --chart-cat-1: var(--ledger);
+    --chart-cat-2: var(--event);
+    --chart-cat-3: #7d93e8;
+    --chart-cat-4: #e0b36a;
+    --chart-cat-5: #3d6ae0;
+    --chart-cat-6: #a88442;
+    --chart-cat-7: #b4c2f0;
+    --chart-cat-8: #ecd3a8;
+    --chart-seq-1: #111b36;
+    --chart-seq-2: #13224c;
+    --chart-seq-3: #152962;
+    --chart-seq-4: #17327c;
+    --chart-seq-5: #193a96;
+    --chart-seq-6: #1b42b0;
+    --chart-seq-7: #1d49c6;
+    --chart-seq-8: var(--ledger);
+    --chart-axis-label: var(--slate);
+    --chart-axis-title: var(--ink);
+    --chart-grid: var(--grid);
+    --chart-tooltip-bg: #141a2a;
   }
 }
 
@@ -29,6 +174,33 @@ body {
 
 @layer base {
   body {
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     overflow-wrap: anywhere;
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+
+  /* Page titles only. Every other heading stays in Public Sans. */
+  h1 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

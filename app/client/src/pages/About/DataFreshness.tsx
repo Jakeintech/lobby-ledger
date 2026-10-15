@@ -30,7 +30,7 @@ export function DataFreshness({ onRetry }: DataFreshnessProps) {
         id: 'engagements',
         label: 'Engagements',
         value: count(row.engagement_count),
-        hint: 'firm and client pairs, 2024 to 2025',
+        hint: 'firm and client pairs',
       },
       {
         id: 'filings',

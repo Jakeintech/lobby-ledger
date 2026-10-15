@@ -27,16 +27,22 @@ GOLD     one mart per page    topic, topic_quarter, bill, bill_quarter, client, 
    v
 APP      config/queries/*.sql one file per page section -> /api/analytics/query/<name> -> React`;
 
-const LINK_CLASS =
-  'font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring';
+const LINK_CLASS = 'font-medium text-primary underline-offset-4 hover:underline';
 
-function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+/**
+ * One note: the heading sits in the left column at desktop width and above
+ * the text on a phone, with a rule between notes. The rule is the structure.
+ */
+function Note({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
-    <section aria-labelledby={`${id}-heading`} className="space-y-2">
-      <h2 id={`${id}-heading`} className="text-lg font-semibold tracking-tight">
+    <section
+      aria-labelledby={`${id}-heading`}
+      className="grid grid-cols-[minmax(0,1fr)] gap-x-10 gap-y-2 border-t border-border pt-5 md:grid-cols-[12rem_minmax(0,1fr)]"
+    >
+      <h2 id={`${id}-heading`} className="text-base font-semibold tracking-tight text-foreground">
         {title}
       </h2>
-      {children}
+      <div className="min-w-0 space-y-3 text-foreground">{children}</div>
     </section>
   );
 }
@@ -46,16 +52,16 @@ export function AboutPage() {
   usePageTitle('About the data');
 
   return (
-    <article className="max-w-3xl space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">About the data</h1>
-        <p className="text-muted-foreground">
+    <article className="max-w-4xl space-y-8">
+      <header className="max-w-2xl space-y-2 pt-6">
+        <h1 className="text-3xl sm:text-4xl">About the data</h1>
+        <p className="text-lg text-muted-foreground">
           Where the filings come from, what reported income and a quarter mean, why topic totals overlap, how the slice
           was chosen, and how the summaries are produced.
         </p>
       </header>
 
-      <Section id="source" title="Source and freshness">
+      <Note id="source" title="Source and freshness">
         <p>
           Every figure comes from the U.S. Senate Office of Public Records{' '}
           <a href={SOURCE_URL} className={LINK_CLASS} rel="noreferrer">
@@ -65,9 +71,9 @@ export function AboutPage() {
           on {PULLED_ON}. The figures below are read live from the Gold layer.
         </p>
         <RetrySection>{(retry) => <DataFreshness onRetry={retry} />}</RetrySection>
-      </Section>
+      </Note>
 
-      <Section id="income" title="Reported income">
+      <Note id="income" title="Reported income">
         <p>
           A lobbying firm files one report per client per quarter and discloses the income it received from that client
           for lobbying during the quarter, in U.S. dollars, rounded to the nearest $10,000 by the filer. Lobby Ledger
@@ -75,9 +81,9 @@ export function AboutPage() {
           leave the income field blank, and Lobby Ledger counts a blank as $0 rather than dropping the quarter, so a
           chart with a $0 bar means the firm filed but reported nothing, not that the quarter is missing.
         </p>
-      </Section>
+      </Note>
 
-      <Section id="quarters" title="Quarters">
+      <Note id="quarters" title="Quarters">
         <p>
           Every chart puts time on the x-axis as calendar quarters, labelled by their end date: Q1 ends 31 March, Q2
           ends 30 June, Q3 ends 30 September and Q4 ends 31 December. A filing is assigned to the quarter of the period
@@ -85,27 +91,27 @@ export function AboutPage() {
           engagement that terminates mid-year has no quarters after its termination date; the last reported value is
           never carried forward.
         </p>
-      </Section>
+      </Note>
 
-      <Section id="amendments" title="Amendments">
+      <Note id="amendments" title="Amendments">
         <p>
           A filer can amend a quarterly report any number of times. For each firm, client and quarter, Lobby Ledger
           keeps only the latest amendment and uses its income, lobbyists and issues. Earlier versions stay in the Silver
           layer as history but never count toward a chart or a total, so no quarter is counted twice.
         </p>
-      </Section>
+      </Note>
 
-      <Section id="attribution" title="Issue attribution overlap">
+      <Note id="attribution" title="Issue attribution overlap">
         <p>
           A filing lists one or more general issue codes, such as TAX or HCR, and reports a single income figure for the
           whole quarter. The filing does not split that income between issues, so Lobby Ledger counts the full amount
           toward every issue the filing lists. Topic totals therefore overlap: a $500,000 report that lists TAX and HCR
-          adds $500,000 to each. For that reason no page adds topic totals together, and the sum of the Home page tiles
-          is larger than the total reported income.
+          adds $500,000 to each. For that reason no page adds topic totals together, and the issue areas on Home add up
+          to more than the total reported income.
         </p>
-      </Section>
+      </Note>
 
-      <Section id="slice" title="The $500,000 slice">
+      <Note id="slice" title="The $500,000 slice">
         <p>
           The data is a slice, not the whole database. It holds every firm and client pair that reported at least
           $500,000 of income on a single quarterly filing in 2024 or 2025, together with that pair&rsquo;s complete 2024
@@ -114,9 +120,9 @@ export function AboutPage() {
           from search may still lobby; it just did so below that level. Years before 2024, foreign entities and
           affiliated organizations are out of scope.
         </p>
-      </Section>
+      </Note>
 
-      <Section id="summaries" title="AI summaries">
+      <Note id="summaries" title="AI summaries">
         <p>
           The one-line summary beside each engagement is written by a large language model from the free-text issue
           descriptions on that engagement&rsquo;s filings, using the Databricks <code>ai_query</code> function. It is
@@ -124,9 +130,9 @@ export function AboutPage() {
           check it against the filing before relying on it, and expect it to miss nuance or to repeat the filer&rsquo;s
           own framing.
         </p>
-      </Section>
+      </Note>
 
-      <Section id="lakehouse" title="The lakehouse">
+      <Note id="lakehouse" title="The lakehouse">
         <p>
           Lobby Ledger runs on a Databricks lakehouse with three layers. Bronze keeps the filings as they arrived.
           Silver is a Data Vault 2.0 Raw Vault, which records every version of every filing without applying any
@@ -134,7 +140,7 @@ export function AboutPage() {
           SQL file per page section, as a single read-only identity.
         </p>
         <pre
-          className="overflow-x-auto rounded-lg border bg-muted p-4 text-xs leading-relaxed"
+          className="overflow-x-auto border-y border-border py-3 font-mono text-xs leading-relaxed text-foreground"
           aria-label="Lakehouse diagram: LDA API to Bronze, Silver, Gold, then the app"
         >
           {DIAGRAM}
@@ -146,9 +152,9 @@ export function AboutPage() {
           </a>
           .
         </p>
-      </Section>
+      </Note>
 
-      <p>
+      <p className="border-t border-border pt-5">
         <Link to={HOME_PATH} className={LINK_CLASS}>
           Back to Home
         </Link>

@@ -9,13 +9,16 @@ import { count, money, quarterLabel, toNumber } from '@/lib/format';
 /** `home_quarters` takes no parameters; one shared object keeps the hook's cache key stable. */
 const NO_PARAMS: Record<string, never> = {};
 
+const compactMoney = (n: number) => money(n, { compact: true });
+
 export interface IncomeOverviewProps {
   onRetry: () => void;
 }
 
 /**
  * The Home centerpiece: reported income across every engagement, one point
- * per quarter end, with the headline figures above it.
+ * per quarter end, with the headline figures above it. The total counts up
+ * once on load; the chart carries a range control to narrow the quarters.
  */
 export function IncomeOverview({ onRetry }: IncomeOverviewProps) {
   const { data, loading, error } = useAnalyticsQuery('home_quarters', NO_PARAMS);
@@ -40,11 +43,17 @@ export function IncomeOverview({ onRetry }: IncomeOverviewProps) {
     const peak = quarters.reduce((best, row) => (row.income > best.income ? row : best), first);
     const span = `${quarterLabel(first.period_end_date)} to ${quarterLabel(last.period_end_date)}`;
     return [
-      { id: 'total', label: 'Reported income', value: money(total, { compact: true }), hint: span },
+      {
+        id: 'total',
+        label: 'Reported income',
+        value: compactMoney(total),
+        hint: span,
+        countUp: { to: total, format: compactMoney },
+      },
       {
         id: 'peak',
         label: 'Highest quarter',
-        value: money(peak.income, { compact: true }),
+        value: compactMoney(peak.income),
         hint: quarterLabel(peak.period_end_date),
       },
       {
@@ -53,7 +62,6 @@ export function IncomeOverview({ onRetry }: IncomeOverviewProps) {
         value: count(last.engagements),
         hint: `in ${quarterLabel(last.period_end_date)}`,
       },
-      { id: 'quarters', label: 'Quarters covered', value: count(quarters.length), hint: span },
     ];
   }, [quarters]);
 
@@ -71,14 +79,16 @@ export function IncomeOverview({ onRetry }: IncomeOverviewProps) {
       emptyMessage="No quarterly report in the data carries any income, so there is nothing to chart yet."
       onRetry={onRetry}
     >
-      <div className="space-y-4">
-        <StatTiles tiles={tiles} columns={4} />
+      <div className="space-y-6">
+        <StatTiles tiles={tiles} columns={3} />
         <QuarterChart
           title="Reported lobbying income by quarter, all engagements"
           rows={chartRows}
           unit="dollars"
           variant="line"
           valueLabel="Reported income"
+          zoom
+          height={300}
         />
       </div>
     </PageState>

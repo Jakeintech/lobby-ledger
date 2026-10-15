@@ -2,18 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { sql } from '@databricks/appkit-ui/js';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  useAnalyticsQuery,
-} from '@databricks/appkit-ui/react';
+import { useAnalyticsQuery } from '@databricks/appkit-ui/react';
 import { PageState } from '@/components/PageState';
 import { StatTiles } from '@/components/StatTiles';
-import { count, quarterLabel } from '@/lib/format';
+import type { StatTile } from '@/components/StatTiles';
+import { count, quarterLabel, toNumber } from '@/lib/format';
+import { spanText } from '@/lib/ledger';
 import { usePageTitle } from '@/lib/usePageTitle';
+import { CoveredPositions } from '@/pages/Lobbyist/CoveredPositions';
+import { dedupePositions } from '@/pages/Lobbyist/positions';
 import { EngagementTimeline } from '@/pages/Lobbyist/EngagementTimeline';
 
 /**
@@ -35,23 +32,6 @@ function useRemount(): { attempt: number; settling: boolean; retry: () => void }
   return { attempt, settling, retry: () => setSettling(true) };
 }
 
-/**
- * Gold joins distinct covered positions with ` | `. The filings repeat them,
- * sometimes with and sometimes without a final full stop, so dedupe on the
- * text with trailing punctuation removed and keep the longest spelling.
- */
-function splitPositions(positions: string | null): string[] {
-  const byKey = new Map<string, string>();
-  for (const part of (positions ?? '').split(' | ')) {
-    const text = part.trim();
-    if (!text) continue;
-    const key = text.replace(/[\s.;,]+$/, '').toLowerCase();
-    const existing = byKey.get(key);
-    if (!existing || text.length > existing.length) byKey.set(key, text);
-  }
-  return [...byKey.values()];
-}
-
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section aria-label={title} className="space-y-3">
@@ -61,37 +41,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function CoveredPositions({ positions, lobbyistName }: { positions: string[]; lobbyistName: string }) {
-  return (
-    <Card className="min-w-0 overflow-hidden">
-      <CardHeader>
-        <CardTitle>Disclosed former government positions</CardTitle>
-        <CardDescription>
-          The Lobbying Disclosure Act asks each filing to list the covered executive and legislative branch positions a
-          lobbyist held in the previous twenty years. Shown verbatim from the filings, with the filer&apos;s own
-          abbreviations and punctuation.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="min-w-0">
-        {positions.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No former government position was disclosed for {lobbyistName} on any filing in 2024 or 2025.
-          </p>
-        ) : (
-          <ul className="list-disc space-y-2 pl-5 text-sm">
-            {positions.map((position) => (
-              <li key={position} className="break-words">
-                {position}
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 const SLICE_NOTE = 'The data covers every registrant and client pair with a $500,000 filing in 2024 or 2025.';
+const formatCount = (n: number) => count(n);
 
 /** Lobbyist page: who they lobbied for and through, the quarters they were listed, and any covered positions disclosed. */
 export function LobbyistPage() {
@@ -110,40 +61,63 @@ export function LobbyistPage() {
 function LobbyistBody({ id, onRetry }: { id: string; onRetry: () => void }) {
   const params = useMemo(() => ({ id: sql.string(id) }), [id]);
   const detail = useAnalyticsQuery('lobbyist_detail', params);
+  const positions = useAnalyticsQuery('lobbyist_positions', params);
   const engagements = useAnalyticsQuery('lobbyist_engagements', params);
 
   const lobbyist = detail.data?.[0];
   const name = lobbyist?.full_name?.trim() || `lobbyist ${id}`;
   usePageTitle(lobbyist?.full_name?.trim() || `Lobbyist ${id}`);
 
-  const positions = useMemo(() => splitPositions(lobbyist?.covered_positions ?? null), [lobbyist?.covered_positions]);
+  /**
+   * The positions query carries the quarters each disclosure spanned. When it
+   * returns nothing, the detail row's joined list still names the positions,
+   * so fall back to it rather than show none.
+   */
+  const positionList = useMemo(() => {
+    const fromQuery = (positions.data ?? []).map((row) => ({
+      text: row.position_text,
+      first: row.first_period,
+      last: row.last_period,
+    }));
+    if (fromQuery.length > 0) return dedupePositions(fromQuery);
+    return dedupePositions(
+      (lobbyist?.covered_positions ?? '').split(' | ').map((text) => ({ text, first: null, last: null }))
+    );
+  }, [positions.data, lobbyist?.covered_positions]);
   const engagementRows = engagements.data ?? [];
 
-  const tiles = lobbyist
-    ? [
-        {
-          id: 'clients',
-          label: 'Clients',
-          value: count(lobbyist.client_count),
-          hint: 'distinct clients, 2024 to 2025',
-        },
-        { id: 'firms', label: 'Firms', value: count(lobbyist.firm_count), hint: 'registrants that listed them' },
-        {
-          id: 'quarters',
-          label: 'Quarters active',
-          value: count(lobbyist.quarters_active),
-          hint: 'of 8 quarters, 2024 to 2025',
-        },
-        {
-          id: 'span',
-          label: 'First quarter listed',
-          value: lobbyist.first_period ? quarterLabel(lobbyist.first_period) : 'None',
-          hint: lobbyist.last_period
-            ? `last listed ${quarterLabel(lobbyist.last_period)}, 2024 to 2025`
-            : 'only on a registration, 2024 to 2025',
-        },
-      ]
-    : [];
+  const tiles = useMemo<StatTile[]>(
+    () =>
+      lobbyist
+        ? [
+            {
+              id: 'clients',
+              label: 'Clients',
+              value: count(lobbyist.client_count),
+              hint: 'distinct clients',
+              countUp: { to: toNumber(lobbyist.client_count), format: formatCount },
+            },
+            { id: 'firms', label: 'Firms', value: count(lobbyist.firm_count), hint: 'registrants that listed them' },
+            {
+              id: 'quarters',
+              label: 'Quarters active',
+              value: count(lobbyist.quarters_active),
+              hint: 'of 8 quarters',
+            },
+            {
+              id: 'span',
+              label: 'First quarter listed',
+              value: lobbyist.first_period ? quarterLabel(lobbyist.first_period) : 'None',
+              hint: lobbyist.last_period
+                ? `last listed ${quarterLabel(lobbyist.last_period)}`
+                : 'only on a registration',
+            },
+          ]
+        : [],
+    [lobbyist]
+  );
+
+  const span = lobbyist ? spanText(lobbyist.first_period, lobbyist.last_period, quarterLabel) : null;
 
   return (
     <div className="space-y-8">
@@ -158,24 +132,33 @@ function LobbyistBody({ id, onRetry }: { id: string; onRetry: () => void }) {
         {lobbyist && (
           <header className="space-y-4">
             <div className="space-y-1">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Lobbyist</p>
-              <h1 className="text-2xl font-semibold tracking-tight">{lobbyist.full_name}</h1>
-              <p className="text-sm text-muted-foreground">
-                As named on Lobbying Disclosure Act quarterly reports, 2024 to 2025.{' '}
-                {lobbyist.first_period && lobbyist.last_period
-                  ? `Listed from ${quarterLabel(lobbyist.first_period)} to ${quarterLabel(lobbyist.last_period)}.`
-                  : 'Never listed on a quarterly report, only on a registration.'}
+              <h1 className="text-3xl tracking-tight">{lobbyist.full_name}</h1>
+              <p className="text-muted-foreground">
+                A lobbyist named on Lobbying Disclosure Act quarterly reports for{' '}
+                {count(lobbyist.client_count) === '1' ? 'one client' : `${count(lobbyist.client_count)} clients`}
+                {span ? `, listed ${span}.` : ', never on a quarterly report, only on a registration.'}
               </p>
             </div>
             <StatTiles tiles={tiles} columns={4} />
-            <Section title="Disclosed former government positions">
-              <CoveredPositions positions={positions} lobbyistName={name} />
-            </Section>
           </header>
         )}
       </PageState>
 
-      <Section title="Engagements and quarters active">
+      {lobbyist && (
+        <Section title="Disclosed former government positions">
+          <PageState
+            loading={positions.loading}
+            error={positions.error}
+            empty={false}
+            emptyMessage=""
+            onRetry={onRetry}
+          >
+            <CoveredPositions positions={positionList} lobbyistName={name} />
+          </PageState>
+        </Section>
+      )}
+
+      <Section title="Engagements and quarters listed">
         <PageState
           loading={engagements.loading}
           error={engagements.error}

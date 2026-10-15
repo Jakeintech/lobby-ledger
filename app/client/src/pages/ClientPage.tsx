@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { sql } from '@databricks/appkit-ui/js';
-import { Badge, useAnalyticsQuery } from '@databricks/appkit-ui/react';
+import { useAnalyticsQuery } from '@databricks/appkit-ui/react';
 import { EngagementTable } from '@/components/EngagementTable';
 import { EntityLink } from '@/components/EntityLink';
 import { PageState } from '@/components/PageState';
 import { QuarterChart } from '@/components/QuarterChart';
 import { StatTiles } from '@/components/StatTiles';
-import { count, money, toNumber } from '@/lib/format';
+import type { StatTile } from '@/components/StatTiles';
+import { count, money, quarterLabel, toNumber } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { BillsAndEntities } from '@/pages/Client/BillsAndEntities';
 import { ClientLobbyists } from '@/pages/Client/ClientLobbyists';
@@ -43,18 +44,17 @@ function splitCodes(codes: string | null): string[] {
   ];
 }
 
-function TopicBadges({ codes }: { codes: string | null }) {
+/** The issue codes on the entity's filings, each a link to its topic page. */
+function TopicLinks({ codes }: { codes: string | null }) {
   const list = splitCodes(codes);
   if (list.length === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-sm text-muted-foreground">Issues lobbied:</span>
+    <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+      <span className="text-muted-foreground">Issues lobbied</span>
       {list.map((code) => (
-        <Badge key={code} variant="outline" asChild>
-          <EntityLink kind="topic" id={code} className="font-normal no-underline" />
-        </Badge>
+        <EntityLink key={code} kind="topic" id={code} />
       ))}
-    </div>
+    </p>
   );
 }
 
@@ -67,7 +67,15 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+/** Trims a filer's free-text description and ends it with a full stop, or returns an empty string. */
+function sentence(text: string | null | undefined): string {
+  const trimmed = text?.trim() ?? '';
+  if (!trimmed) return '';
+  return /[.!?]$/.test(trimmed) ? ` ${trimmed}` : ` ${trimmed}.`;
+}
+
 const SLICE_NOTE = 'The data covers every registrant and client pair with a $500,000 filing in 2024 or 2025.';
+const formatMoney = (n: number) => money(n);
 
 /** Client page: income by quarter, the firms it hired, and the lobbyists those firms listed. */
 export function ClientPage() {
@@ -89,6 +97,7 @@ function ClientBody({ id, onRetry }: { id: string; onRetry: () => void }) {
   const quarters = useAnalyticsQuery('client_quarters', params);
   const engagements = useAnalyticsQuery('client_engagements', params);
   const lobbyists = useAnalyticsQuery('client_lobbyists', params);
+  const [quarter, setQuarter] = useState<string | null>(null);
 
   const client = detail.data?.[0];
   const name = client?.name?.trim() || `client ${id}`;
@@ -105,34 +114,42 @@ function ClientBody({ id, onRetry }: { id: string; onRetry: () => void }) {
   const engagementRows = engagements.data ?? [];
   const lobbyistRows = lobbyists.data ?? [];
 
-  const tiles = client
-    ? [
-        {
-          id: 'income',
-          label: 'Reported income',
-          value: money(client.total_income),
-          hint: 'U.S. dollars on quarterly reports, 2024 to 2025',
-        },
-        {
-          id: 'firms',
-          label: 'Firms hired',
-          value: count(client.firm_count),
-          hint: 'registrants with a filing, 2024 to 2025',
-        },
-        {
-          id: 'quarters',
-          label: 'Quarters active',
-          value: count(client.quarters_active),
-          hint: 'of 8 quarters, 2024 to 2025',
-        },
-        {
-          id: 'lobbyists',
-          label: 'Lobbyists',
-          value: count(client.lobbyist_count),
-          hint: 'named on its filings, 2024 to 2025',
-        },
-      ]
-    : [];
+  const tiles = useMemo<StatTile[]>(
+    () =>
+      client
+        ? [
+            {
+              id: 'income',
+              label: 'Reported income',
+              value: money(client.total_income),
+              hint: 'U.S. dollars on quarterly reports',
+              countUp: { to: toNumber(client.total_income), format: formatMoney },
+            },
+            {
+              id: 'firms',
+              label: 'Firms hired',
+              value: count(client.firm_count),
+              hint: 'registrants with a filing',
+            },
+            {
+              id: 'quarters',
+              label: 'Quarters active',
+              value: count(client.quarters_active),
+              hint: 'of 8 quarters',
+            },
+            {
+              id: 'lobbyists',
+              label: 'Lobbyists',
+              value: count(client.lobbyist_count),
+              hint: 'named on its filings',
+            },
+          ]
+        : [],
+    [client]
+  );
+
+  const state = client?.state?.trim();
+  const description = sentence(client?.description);
 
   return (
     <div className="space-y-8">
@@ -147,14 +164,14 @@ function ClientBody({ id, onRetry }: { id: string; onRetry: () => void }) {
         {client && (
           <header className="space-y-4">
             <div className="space-y-1">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Client</p>
-              <h1 className="text-2xl font-semibold tracking-tight">{client.name}</h1>
-              {client.description?.trim() && <p className="text-muted-foreground">{client.description.trim()}</p>}
-              {client.state?.trim() && (
-                <p className="text-sm text-muted-foreground">Registered in {client.state.trim()}.</p>
-              )}
+              <h1 className="text-3xl tracking-tight">{client.name}</h1>
+              <p className="text-muted-foreground">
+                {state ? `A client registered in ${state}` : 'A client'} that hired{' '}
+                {count(client.firm_count) === '1' ? 'one lobbying firm' : `${count(client.firm_count)} lobbying firms`}{' '}
+                in 2024 to 2025.{description}
+              </p>
             </div>
-            <TopicBadges codes={client.issue_codes} />
+            <TopicLinks codes={client.issue_codes} />
             <StatTiles tiles={tiles} columns={4} />
           </header>
         )}
@@ -174,11 +191,13 @@ function ClientBody({ id, onRetry }: { id: string; onRetry: () => void }) {
             rows={quarterRows}
             unit="dollars"
             valueLabel="Reported income"
+            selected={quarter}
+            onSelect={setQuarter}
           />
         </PageState>
       </Section>
 
-      <Section title="Firms hired">
+      <section aria-labelledby="client-firms-heading" className="space-y-3">
         <PageState
           loading={engagements.loading}
           error={engagements.error}
@@ -187,19 +206,24 @@ function ClientBody({ id, onRetry }: { id: string; onRetry: () => void }) {
           emptyMessage={`No engagement in the data lists ${name} as the client. ${SLICE_NOTE}`}
           onRetry={onRetry}
         >
-          <div className="space-y-3">
-            <div>
-              <h3 className="text-lg font-semibold tracking-tight">Firms hired by {name}</h3>
-              <p className="text-sm text-muted-foreground">
-                {count(engagementRows.length)} {engagementRows.length === 1 ? 'engagement' : 'engagements'} ranked by
-                reported income in U.S. dollars, 2024 to 2025. Each row is one firm and client pair.
-              </p>
+          <div className="space-y-8">
+            <div className="space-y-3">
+              <div className="border-t border-border pt-3">
+                <h2 id="client-firms-heading" className="text-base font-medium text-foreground">
+                  Firms hired by {name}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {count(engagementRows.length)} {engagementRows.length === 1 ? 'engagement' : 'engagements'}
+                  {quarter ? `, showing those active in ${quarterLabel(quarter)}` : ''}, in U.S. dollars on quarterly
+                  reports, 2024 to 2025. Each row is one firm and client pair. Click a column to sort.
+                </p>
+              </div>
+              <EngagementTable rows={engagementRows} hide="client" quarterFilter={quarter} />
             </div>
-            <EngagementTable rows={engagementRows} hide="client" />
             <BillsAndEntities rows={engagementRows} clientName={name} />
           </div>
         </PageState>
-      </Section>
+      </section>
 
       <Section title="Lobbyists listed">
         <PageState

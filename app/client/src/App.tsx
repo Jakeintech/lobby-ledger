@@ -1,6 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { Layout } from '@/components/Layout';
-import { SearchBox } from '@/components/SearchBox';
 import { ROUTE_PATTERNS } from '@/lib/routes';
 import { AboutPage } from '@/pages/AboutPage';
 import { BillPage } from '@/pages/BillPage';
@@ -17,7 +16,7 @@ const FRESHNESS = 'Filings pulled 15 October 2026.';
 export default function App() {
   return (
     <BrowserRouter>
-      <Layout freshness={FRESHNESS} search={<SearchBox />}>
+      <Layout freshness={FRESHNESS}>
         <Routes>
           <Route path={ROUTE_PATTERNS.home} element={<HomePage />} />
           <Route path={ROUTE_PATTERNS.topic} element={<TopicPage />} />
