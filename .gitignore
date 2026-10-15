@@ -1,0 +1,6 @@
+node_modules/
+.databricks/
+.env*
+dist/
+data/raw/*.json
+.DS_Store
