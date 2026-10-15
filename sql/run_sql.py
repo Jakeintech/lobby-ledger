@@ -3,7 +3,7 @@
 Uses the Databricks CLI (OAuth login) and the SQL Statement Execution API,
 so no token ever touches this repo.
 
-Usage: python3 sql/run_sql.py sql/northstar.sql
+Usage: python3 sql/run_sql.py sql/lakehouse.sql
 Env:   DATABRICKS_WAREHOUSE_ID (required), DATABRICKS_CATALOG (default: workspace),
        AI_ENDPOINT (default: databricks-meta-llama-3-3-70b-instruct)
 """

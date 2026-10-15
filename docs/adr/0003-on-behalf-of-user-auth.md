@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-A Databricks App runs with its own service principal. Any query the app runs as that principal sees whatever the principal was granted, which is the same for every person using the app. In a law firm, who can see which matter is governed by ethical walls, so the database must know who is asking.
+A Databricks App runs with its own service principal. Any query the app runs as that principal sees whatever the principal was granted, which is the same for every person using the app. In professional services, who can see which matter is often governed by ethical walls, so the database must know who is asking.
 
 ## Decision
 

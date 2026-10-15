@@ -1,8 +1,8 @@
--- northstar.sql
+-- lakehouse.sql
 -- Builds the Silver Raw Vault and the Gold Business Vault + marts from Bronze.
 -- Idempotent: safe to run again. Hubs, links and satellites only insert rows
 -- they have not seen; Gold is rebuilt from Silver on every run.
--- Run with: python3 sql/run_sql.py sql/northstar.sql
+-- Run with: python3 sql/run_sql.py sql/lakehouse.sql
 --
 -- Hard rules (Silver): cast, trim, upper, md5, dedupe. No business meaning.
 -- Soft rules (Gold): status, totals, as-of logic, anything a business user
@@ -15,7 +15,7 @@ CREATE SCHEMA IF NOT EXISTS gold;
 -- SILVER: RAW VAULT
 -- =====================================================================
 
--- hub_registrant: one row per lobbying firm ever seen (the "law firm").
+-- hub_registrant: one row per lobbying firm ever seen (the "firm").
 -- Business key is the LDA registrant id. The hash key is md5 of the
 -- normalized business key so every layer can join without lookups.
 CREATE TABLE IF NOT EXISTS silver.hub_registrant (
@@ -332,8 +332,8 @@ LEFT JOIN gold.engagement_ai_summary a ON a.engagement_hk = e.engagement_hk;
 -- GOLD: ACCESS DEMO
 -- =====================================================================
 
--- engagement_access: who may see which engagement (ethical walls in the
--- law-firm version). Seeded so the person running this script can see
+-- engagement_access: who may see which engagement (ethical walls in a
+-- professional-services setting). Seeded so the person running this script can see
 -- every engagement except those for one firm.
 CREATE OR REPLACE TABLE gold.engagement_access AS
 SELECT current_user() AS user_email, e.engagement_hk

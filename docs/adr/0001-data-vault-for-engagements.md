@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-A lobbying engagement (a registrant working for a client) is reported again every quarter. Income, the team of lobbyists, the issues covered and the status all change from one filing to the next, and filings get amended. The same shape exists in a law firm: a matter is observed many times as timekeepers, billing and status change. We need full history, we need to reload safely, and we expect more sources later (a CRM, a time-entry system) that describe the same clients and people.
+A lobbying engagement (a registrant working for a client) is reported again every quarter. Income, the team of lobbyists, the issues covered and the status all change from one filing to the next, and filings get amended. The same shape exists in any professional-services firm: a matter is observed many times as timekeepers, billing and status change. We need full history, we need to reload safely, and we expect more sources later (a CRM, a time-entry system) that describe the same clients and people.
 
 ## Decision
 

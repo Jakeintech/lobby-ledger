@@ -1,12 +1,12 @@
 # Walkthrough
 
-The narrative for presenting this repo: the problem, the architecture, each layer, the decisions, and what I learned.
+A tour of the project: the problem, the architecture, each layer and the decisions behind it.
 
 ## The problem
 
 Professional-services firms keep asking the same question: "have we done this before, who did it, and what did we deliver?" The answer is spread across billing, matter management and people systems, and every matter changes over time. U.S. lobbying disclosures have the same shape and are public, so they make an honest twin:
 
-| Law firm | Lobbying disclosure |
+| Professional-services concept | Lobbying disclosure |
 |---|---|
 | Firm | Registrant |
 | Client | Client |
@@ -22,7 +22,7 @@ LDA API (lda.gov)
    |  ingest/pull_lda.py  (stands in for CDC)
    v
 BRONZE  workspace.bronze.lda_*        source-shaped, + load_date, record_source
-   |  sql/northstar.sql  HARD RULES: cast, trim, upper, md5, dedupe
+   |  sql/lakehouse.sql  HARD RULES: cast, trim, upper, md5, dedupe
    v
 SILVER  Raw Vault: hubs, links, satellites (hash keys, hash_diff)
    |  SOFT RULES: status, totals, amendments, as-of logic
