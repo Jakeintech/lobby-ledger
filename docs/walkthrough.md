@@ -84,6 +84,3 @@ Three SQL files in `app/config/queries/`: `experience_search.sql` (service princ
 - [ADR 0002](adr/0002-apps-read-gold-only.md): apps read Gold only.
 - [ADR 0003](adr/0003-on-behalf-of-user-auth.md): on-behalf-of-user auth for governed queries.
 
-## What I learned
-
-See [LEARNING.md](../LEARNING.md).

@@ -4,3 +4,4 @@ node_modules/
 dist/
 data/raw/*.json
 .DS_Store
+LEARNING.md

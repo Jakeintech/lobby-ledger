@@ -4,4 +4,4 @@ A miniature Databricks lakehouse built on public U.S. Lobbying Disclosure Act fi
 
 The domain is a stand-in for professional-services data: a lobbying firm is a law firm, a client is a client, a lobbyist is a timekeeper, a general issue code is a practice group, and a firm-client engagement is a matter observed once per quarter.
 
-Work in progress. See [LEARNING.md](LEARNING.md) for what is finished.
+Work in progress.
