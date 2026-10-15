@@ -1,5 +1,7 @@
 # Lobbying Experience Search
 
+Live app: https://lobbying-experience-search-7474655336005380.aws.databricksapps.com (Databricks workspace login required).
+
 A miniature Databricks lakehouse built on public U.S. Lobbying Disclosure Act (LDA) filings. Lobbying firms file a report every quarter for every client they represent, listing the lobbyists who worked on it, the issues they covered and what they were paid. This repo lands 245 real filings in a Bronze layer, models them as a Data Vault 2.0 in Silver, publishes a Business Vault and marts in Gold, and puts a small Databricks AppKit app on top that answers one question: "find every engagement like this one, who worked it, and what it was about." An `ai_query()` call writes a one-sentence summary per engagement, and a secure view filters results by the signed-in user.
 
 The domain is a stand-in for professional-services data: a lobbying firm is the firm, a lobbyist is a timekeeper, a general issue code is a practice group, and a firm-client engagement is a matter observed once per quarter. The point of the build is the modelling discipline, not the data: hard rules (cast, trim, hash, dedupe) stop at Silver, soft rules (status, totals, as-of logic) start at Gold, every Silver insert is idempotent through hash keys and `hash_diff`, and the app reads Gold only.
@@ -50,6 +52,7 @@ APPKIT   app/config/queries/*.sql  ->  /api/analytics/query/<name>  ->  React UI
 | Gold | `engagement_ai_summary` | One sentence per engagement from `ai_query()`, only computed once |
 | Gold | `experience_search` | The product view the app reads |
 | Gold | `engagement_access`, `experience_search_secure` | Row-level access by `current_user()` |
+| Grants | `sql/grants.sql` | USE CATALOG, USE SCHEMA and SELECT on Gold for the app service principal and a user |
 
 ## Run it
 
@@ -64,15 +67,17 @@ python3 sql/run_sql.py sql/bronze.sql           # schema, volume, then upload da
                                                 # /Volumes/workspace/bronze/landing before the tables
 python3 sql/run_sql.py sql/lakehouse.sql        # Silver and Gold; safe to run again
 python3 sql/run_sql.py sql/proof.sql            # idempotency and row-count checks
+python3 sql/run_sql.py sql/grants.sql           # Gold grants for the app service principal and a user
 
 cd app && pnpm install && pnpm run typegen && pnpm run dev   # http://localhost:8000
+cd app && databricks apps deploy                               # validate, upload, build, start
 ```
 
 Proof from the first two runs: 245 satellite rows and 245 distinct `filing_uuid || hash_diff` versions before and after a rerun, 46 engagements in `experience_search`, 46 AI summaries, 212 PIT rows, 651 bridge rows, 203 quarterly facts.
 
 ## What I would do next
 
-- Deploy the app with `databricks apps deploy` and user authorization so the `.obo.sql` query runs as the signed-in person rather than the CLI identity.
+- Confirm the `.obo.sql` query reports the signed-in user's email in `queried_as` now that the app is deployed with the `sql` user scope.
 - Replace the CSV pull with Lakeflow Connect or Auto Loader and make Bronze append-only with a `load_date` watermark.
 - Add a second load with changed income to show `hash_diff` creating a new satellite row and `pit_engagement` moving.
 - Express the Gold rules as a dbt project or Lakeflow Declarative Pipeline with tests on hash-key uniqueness.
