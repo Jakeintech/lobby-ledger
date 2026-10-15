@@ -294,6 +294,36 @@ SELECT engagement_hk,
 FROM silver.sat_engagement_issues_text
 GROUP BY engagement_hk;
 
+-- engagement_bill: bill numbers mentioned in the issue text (H.R. 1, S. 567,
+-- H.J.Res. 12 ...). A soft rule: regex over free text, so it lives in Gold.
+-- bill_key is the normalized form used for joins and search; bill_label is
+-- the display form.
+CREATE OR REPLACE TABLE gold.engagement_bill AS
+WITH refs AS (
+  SELECT t.engagement_hk, t.filing_uuid, t.issue_code,
+         regexp_replace(raw_ref, '[^A-Z0-9]', '') AS bill_key
+  FROM silver.sat_engagement_issues_text t
+  LATERAL VIEW explode(regexp_extract_all(upper(t.specific_issues),
+    '(?<!U\\.)\\b(?:H\\.?\\s?J\\.?\\s?RES\\.?|S\\.?\\s?J\\.?\\s?RES\\.?|H\\.?\\s?CON\\.?\\s?RES\\.?|S\\.?\\s?CON\\.?\\s?RES\\.?|H\\.?\\s?RES\\.?|S\\.?\\s?RES\\.?|H\\.?\\s?R\\.?|S\\.)\\s?\\d{1,5}\\b', 0)) AS raw_ref
+),
+labeled AS (
+  SELECT engagement_hk, filing_uuid, issue_code, bill_key,
+         CASE regexp_replace(bill_key, '[0-9]', '')
+           WHEN 'HR' THEN 'H.R. ' WHEN 'S' THEN 'S. '
+           WHEN 'HJRES' THEN 'H.J.Res. ' WHEN 'SJRES' THEN 'S.J.Res. '
+           WHEN 'HCONRES' THEN 'H.Con.Res. ' WHEN 'SCONRES' THEN 'S.Con.Res. '
+           WHEN 'HRES' THEN 'H.Res. ' WHEN 'SRES' THEN 'S.Res. ' END
+         || regexp_replace(bill_key, '[A-Z]', '') AS bill_label
+  FROM refs
+)
+SELECT l.engagement_hk, l.bill_key, max(l.bill_label) AS bill_label,
+       count(DISTINCT l.filing_uuid) AS filings_mentioning,
+       min(f.period_end_date) AS first_period, max(f.period_end_date) AS last_period,
+       array_join(array_sort(collect_set(l.issue_code)), ', ') AS issue_codes
+FROM labeled l
+LEFT JOIN gold.fact_filing f ON f.filing_uuid = l.filing_uuid
+GROUP BY l.engagement_hk, l.bill_key;
+
 -- engagement_ai_summary: one-sentence summary per engagement from a
 -- foundation model via ai_query(). Only engagements without a summary are
 -- sent to the model, so reruns cost nothing.
@@ -320,7 +350,9 @@ SELECT e.engagement_hk,
        (SELECT count(DISTINCT b.lobbyist_hk) FROM gold.bridge_registrant_client_lobbyist b
          WHERE b.engagement_hk = e.engagement_hk) AS lobbyist_count,
        x.total_income, x.first_period, x.last_period, x.quarters_active, x.engagement_status,
-       a.ai_summary, t.issues_text
+       a.ai_summary, t.issues_text,
+       (SELECT nullif(array_join(array_sort(collect_set(b.bill_label)), ', '), '')
+          FROM gold.engagement_bill b WHERE b.engagement_hk = e.engagement_hk) AS bill_refs
 FROM silver.link_engagement e
 JOIN gold.sat_engagement_computed x ON x.engagement_hk = e.engagement_hk
 JOIN gold.dim_registrant r ON r.registrant_hk = e.registrant_hk

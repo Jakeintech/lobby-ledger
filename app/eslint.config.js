@@ -15,6 +15,8 @@ export default tseslint.config(
       '**/.next/**',
       '**/coverage/**',
       'client/dist/**',
+      'shared/appkit-types/**',
+      'server/example.test.ts',
       '**.databricks/**',
     ],
   },

@@ -28,8 +28,50 @@ declare module "@databricks/appkit-ui/react" {
           team_as_of: string;
         }>;
       };
+    engagement_bills: {
+        name: "engagement_bills";
+        parameters: {
+          /** STRING - use sql.string() */
+          engagement_hk: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          bill_label: string;
+          /** @sqlType STRING */
+          bill_key: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+        }>;
+      };
     engagement_team: {
         name: "engagement_team";
+        parameters: {
+          /** STRING - use sql.string() */
+          engagement_hk: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist: string;
+          /** @sqlType BIGINT */
+          quarters_listed: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType DOUBLE */
+          income_while_listed: number;
+          /** @sqlType STRING */
+          queried_as: string;
+        }>;
+      };
+    engagement_team_sp: {
+        name: "engagement_team_sp";
         parameters: {
           /** STRING - use sql.string() */
           engagement_hk: SQLStringMarker;

@@ -1,0 +1,11 @@
+node_modules
+dist
+client/dist
+.env
+.env.*
+!.env.example
+.databricks
+.smoke-test
+test-results
+playwright-report
+.git

@@ -29,6 +29,18 @@ APPKIT   app/config/queries/*.sql  ->  /api/analytics/query/<name>  ->  React UI
          engagement_asof.sql (reads the PIT table)
 ```
 
+## Using the app
+
+The page is built around three questions a professional-services firm asks about its own matters. Each maps to one panel and one SQL file.
+
+| Question | Where | Query | Runs as |
+|---|---|---|---|
+| 1. Have we done this before? | Search: issue code, keyword, year. Try TAX plus "endowment". | `experience_search.sql` | App service principal, cached |
+| 2. Who worked it? | Select a row. The Team panel lists every lobbyist on its filings and how many quarters they were listed. | `engagement_team.obo.sql` | The signed-in user (on behalf of user) |
+| 3. What did it look like at the time? | Pick a quarter end. Status, income and team are what someone would have seen then. | `engagement_asof.sql` | App service principal, reads `pit_engagement` |
+
+Status means: active, the engagement filed in the latest quarter in the data; lapsed, it terminated or stopped filing. Summaries come from a foundation model over the filing text and should be checked against the filing.
+
 ## Schema objects
 
 | Layer | Object | Role |
