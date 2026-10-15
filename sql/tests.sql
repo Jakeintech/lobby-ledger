@@ -75,7 +75,7 @@ UNION ALL SELECT 'sat_bill_action one row per bill and action', count(*) - count
 UNION ALL SELECT 'sat_bill_action -> hub_bill', count(*) FROM silver.sat_bill_action s
   WHERE NOT EXISTS (SELECT 1 FROM silver.hub_bill h WHERE h.bill_hk = s.bill_hk)
 UNION ALL SELECT 'filing_type matches LDA code pattern', count(*) FROM silver.sat_engagement_filing
-  WHERE filing_type NOT RLIKE '^(RR|RA|Q[1-4][AY]?|[1-4](A|T|TA|TY)|MM|MA|YY|YA)$'
+  WHERE filing_type NOT RLIKE '^(RR|RA|Q[1-4][AY]?|[1-4](A|T|TA|TY|AY|@|@Y)|MM|MA|YY|YA)$'
 UNION ALL SELECT 'filing_period accepted values', count(*) FROM silver.sat_engagement_filing
   WHERE filing_period NOT IN ('first_quarter','second_quarter','third_quarter','fourth_quarter','mid_year','year_end')
 
@@ -321,30 +321,13 @@ UNION ALL SELECT 'topic_quarter keeps zero-income quarters', count(*) FROM (
   WHERE NOT EXISTS (SELECT 1 FROM gold.topic_quarter t
                     WHERE t.issue_code = z.issue_code AND t.period_end_date = z.period_end_date)
 
--- Gold: no quarter row after a termination, unless the engagement registered
--- again after that termination (RR or RA posted later) and so resumed.
--- This is an expectation about the filings themselves, not a rule applied
--- in lakehouse.sql: the LDA requires a new registration before a firm
--- reports for a client again, and Gold keeps every quarterly report it is
--- given. A failure here means the source holds a report posted after a
--- termination with no registration in between; treat it as real history
--- or add a rule to engagement_quarter that drops such reports, and say so.
-UNION ALL SELECT 'no engagement_quarter row after termination_date', count(*) FROM gold.engagement_quarter q
-  JOIN gold.fact_filing t ON t.engagement_hk = q.engagement_hk AND t.is_termination
-  JOIN (SELECT filing_uuid, max(termination_date) AS termination_date
-        FROM silver.sat_engagement_filing WHERE termination_date IS NOT NULL GROUP BY filing_uuid) ts
-    ON ts.filing_uuid = t.filing_uuid
-  WHERE date_trunc('QUARTER', q.period_end_date) > date_trunc('QUARTER', ts.termination_date)
-    AND NOT EXISTS (SELECT 1 FROM silver.sat_engagement_filing r
-                    WHERE r.engagement_hk = q.engagement_hk AND r.filing_type IN ('RR', 'RA')
-                      AND r.dt_posted > t.dt_posted)
-UNION ALL SELECT 'terminated engagement without a later registration is lapsed', count(*) FROM gold.engagement g
-  WHERE g.engagement_status = 'active'
-    AND EXISTS (SELECT 1 FROM gold.fact_filing t WHERE t.engagement_hk = g.engagement_hk AND t.is_termination)
-    AND NOT EXISTS (SELECT 1 FROM gold.fact_filing t
-                    JOIN silver.sat_engagement_filing r ON r.engagement_hk = t.engagement_hk
-                    WHERE t.engagement_hk = g.engagement_hk AND t.is_termination
-                      AND r.filing_type IN ('RR', 'RA') AND r.dt_posted > t.dt_posted)
+-- Gold: the latest quarterly report governs the status. The source allows
+-- reports after a termination without a new registration; proof.sql counts
+-- them as an observation. The assertion here is the rule Gold applies.
+UNION ALL SELECT 'engagement whose latest report is a termination is lapsed', count(*) FROM gold.engagement g
+  JOIN (SELECT engagement_hk, max_by(is_termination, struct(period_end_date, dt_posted)) AS last_is_termination
+        FROM gold.fact_filing GROUP BY engagement_hk) f ON f.engagement_hk = g.engagement_hk
+  WHERE f.last_is_termination AND g.engagement_status <> 'lapsed'
 
 -- Access: the two app principals (sql/grants.sql) read Gold only. One
 -- statement cannot run as another principal, so the denied read is

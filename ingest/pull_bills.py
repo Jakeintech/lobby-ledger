@@ -26,6 +26,7 @@ from run_sql import run  # noqa: E402
 API = "https://api.congress.gov/v3/bill"
 API_KEY = os.environ.get("CONGRESS_API_KEY", "").strip()
 SLEEP_SECONDS = 0.8  # 5,000 requests per hour allowed; this stays well under
+MIN_MENTIONS = int(os.environ.get("BILL_MIN_MENTIONS", "10"))  # enrich the most-cited bills first; rerun with a lower value to widen
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 RAW = os.path.join(DATA, "raw", "bills")
@@ -64,7 +65,7 @@ def get(url, cache_path):
 
 def bill_keys():
     """Every (congress, bill_key) Gold knows about, with its prefix and number."""
-    resp = run("SELECT DISTINCT congress, bill_key FROM gold.bill_congress ORDER BY congress, bill_key",
+    resp = run(f"SELECT DISTINCT congress, bill_key FROM gold.bill_congress WHERE filings_mentioning >= {MIN_MENTIONS} ORDER BY congress, bill_key",
                os.environ["DATABRICKS_WAREHOUSE_ID"], os.environ.get("DATABRICKS_CATALOG", "workspace"))
     rows = resp.get("result", {}).get("data_array") or []
     out = []

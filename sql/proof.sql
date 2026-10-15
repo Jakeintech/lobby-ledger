@@ -129,3 +129,13 @@ FROM gold.term;
 --   databricks -p <lobby-public profile> api post /api/2.0/sql/statements \
 --     --json '{"statement": "SELECT 1 FROM workspace.silver.hub_client LIMIT 1", "warehouse_id": "..."}'
 -- The expected result is a PERMISSION_DENIED error.
+
+-- 11. Source behaviour, observed not asserted: engagements that filed a
+--     quarterly report after a termination without a new registration.
+--     Gold keeps those reports and lets the latest one govern the status.
+SELECT count(DISTINCT q.engagement_hk) AS engagements_reporting_after_termination
+FROM gold.engagement_quarter q
+JOIN gold.fact_filing t ON t.engagement_hk = q.engagement_hk AND t.is_termination
+WHERE date_trunc('QUARTER', q.period_end_date) > date_trunc('QUARTER', t.period_end_date)
+  AND NOT EXISTS (SELECT 1 FROM silver.sat_engagement_filing r
+                  WHERE r.engagement_hk = q.engagement_hk AND r.filing_type IN ('RR', 'RA') AND r.dt_posted > t.dt_posted);
