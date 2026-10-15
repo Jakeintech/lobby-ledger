@@ -2,5 +2,5 @@ node_modules/
 .databricks/
 .env*
 dist/
-data/raw/*.json
+data/raw/
 .DS_Store
