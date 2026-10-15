@@ -1,6 +1,6 @@
 # Lobbying Experience Search
 
-Live app: https://lobbying-experience-search-7474655336005380.aws.databricksapps.com (Databricks workspace login required).
+Live app: https://lobbying.jakeawilliams.com (public, runs as the app service principal). The same code also runs on Databricks Apps at https://lobbying-experience-search-7474655336005380.aws.databricksapps.com (workspace login required), where the team query runs on behalf of the signed-in user.
 
 A miniature Databricks lakehouse built on public U.S. Lobbying Disclosure Act (LDA) filings. Lobbying firms file a report every quarter for every client they represent, listing the lobbyists who worked on it, the issues they covered and what they were paid. This repo lands 245 real filings in a Bronze layer, models them as a Data Vault 2.0 in Silver, publishes a Business Vault and marts in Gold, and puts a small Databricks AppKit app on top that answers one question: "find every engagement like this one, who worked it, and what it was about." An `ai_query()` call writes a one-sentence summary per engagement, and a secure view filters results by the signed-in user.
 
@@ -38,6 +38,7 @@ The page is built around three questions a professional-services firm asks about
 | 1. Have we done this before? | Search: issue code, keyword, year. Try TAX plus "endowment". | `experience_search.sql` | App service principal, cached |
 | 2. Who worked it? | Select a row. The Team panel lists every lobbyist on its filings and how many quarters they were listed. | `engagement_team.obo.sql` | The signed-in user (on behalf of user) |
 | 3. What did it look like at the time? | Pick a quarter end. Status, income and team are what someone would have seen then. | `engagement_asof.sql` | App service principal, reads `pit_engagement` |
+| Bills on the record | Bill numbers found in the filing text for the picked engagement. | `engagement_bills.sql` | App service principal, reads `engagement_bill` |
 
 Status means: active, the engagement filed in the latest quarter in the data; lapsed, it terminated or stopped filing. Summaries come from a foundation model over the filing text and should be checked against the filing.
 
@@ -64,6 +65,8 @@ Status means: active, the engagement filed in the latest quarter in the data; la
 | Gold | `engagement_ai_summary` | One sentence per engagement from `ai_query()`, only computed once |
 | Gold | `experience_search` | The product view the app reads |
 | Gold | `engagement_access`, `experience_search_secure` | Row-level access by `current_user()` |
+| Gold | `engagement_bill` | Bill numbers (H.R., S., resolutions) extracted from the issue text, with first and last period |
+| Tests | `sql/tests.sql` | dbt-style assertions: unique keys, link-to-hub references, one version per hash_diff, accepted values |
 | Grants | `sql/grants.sql` | USE CATALOG, USE SCHEMA and SELECT on Gold for the app service principal and a user |
 
 ## Run it
@@ -83,6 +86,7 @@ python3 sql/run_sql.py sql/grants.sql           # Gold grants for the app servic
 
 cd app && pnpm install && pnpm run typegen && pnpm run dev   # http://localhost:8000
 cd app && databricks apps deploy                               # validate, upload, build, start
+cd app && vercel deploy --prod                                 # same image via Dockerfile.vercel, needs the four DATABRICKS_* env vars
 ```
 
 Proof from the first two runs: 245 satellite rows and 245 distinct `filing_uuid || hash_diff` versions before and after a rerun, 46 engagements in `experience_search`, 46 AI summaries, 212 PIT rows, 651 bridge rows, 203 quarterly facts.
@@ -94,5 +98,7 @@ Proof from the first two runs: 245 satellite rows and 245 distinct `filing_uuid 
 - Add a second load with changed income to show `hash_diff` creating a new satellite row and `pit_engagement` moving.
 - Express the Gold rules as a dbt project or Lakeflow Declarative Pipeline with tests on hash-key uniqueness.
 - Put a Playwright smoke test and `databricks apps validate` in CI.
+
+Outside Databricks Apps no user token is forwarded, so the team panel falls back to `engagement_team_sp.sql`, the same SQL run as the service principal, and says so on screen.
 
 Decisions are recorded in [docs/adr](docs/adr) and the full tour is in [docs/walkthrough.md](docs/walkthrough.md).
