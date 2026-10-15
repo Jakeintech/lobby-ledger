@@ -21,9 +21,13 @@ declare module "@databricks/appkit-ui/react" {
         name: "bill_detail";
         parameters: {
           /** STRING - use sql.string() */
+          congress: SQLStringMarker;
+          /** STRING - use sql.string() */
           key: SQLStringMarker;
         };
         result: Array<{
+          /** @sqlType INT */
+          congress: number;
           /** @sqlType STRING */
           bill_key: string;
           /** @sqlType STRING */
@@ -32,17 +36,37 @@ declare module "@databricks/appkit-ui/react" {
           engagement_count: number;
           /** @sqlType INT */
           filings_mentioning: number;
-          /** @sqlType DATE */
-          first_period: string;
-          /** @sqlType DATE */
-          last_period: string;
+          /** @sqlType DOUBLE */
+          income: number;
           /** @sqlType STRING */
-          issue_codes: string;
+          title: string;
+          /** @sqlType STRING */
+          policy_area: string;
+          /** @sqlType STRING */
+          sponsor_name: string;
+          /** @sqlType STRING */
+          sponsor_party: string;
+          /** @sqlType STRING */
+          sponsor_state: string;
+          /** @sqlType DATE */
+          introduced_date: string;
+          /** @sqlType DATE */
+          latest_action_date: string;
+          /** @sqlType STRING */
+          latest_action_text: string;
+          /** @sqlType BOOLEAN */
+          is_law: boolean;
+          /** @sqlType STRING */
+          congress_url: string;
+          /** @sqlType STRING */
+          stage: string;
         }>;
       };
     bill_engagements: {
         name: "bill_engagements";
         parameters: {
+          /** STRING - use sql.string() */
+          congress: SQLStringMarker;
           /** STRING - use sql.string() */
           key: SQLStringMarker;
         };
@@ -85,13 +109,49 @@ declare module "@databricks/appkit-ui/react" {
           bill_last_period: string;
         }>;
       };
-    bill_quarters: {
-        name: "bill_quarters";
+    bill_lookup: {
+        name: "bill_lookup";
         parameters: {
           /** STRING - use sql.string() */
           key: SQLStringMarker;
         };
         result: Array<{
+          /** @sqlType INT */
+          congress: number;
+          /** @sqlType STRING */
+          bill_key: string;
+        }>;
+      };
+    bill_milestones: {
+        name: "bill_milestones";
+        parameters: {
+          /** STRING - use sql.string() */
+          congress: SQLStringMarker;
+          /** STRING - use sql.string() */
+          key: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType INT */
+          congress: number;
+          /** @sqlType STRING */
+          bill_key: string;
+          /** @sqlType STRING */
+          milestone: string;
+          /** @sqlType DATE */
+          milestone_date: string;
+        }>;
+      };
+    bill_quarters: {
+        name: "bill_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          congress: SQLStringMarker;
+          /** STRING - use sql.string() */
+          key: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType INT */
+          congress: number;
           /** @sqlType STRING */
           bill_key: string;
           /** @sqlType DATE */
@@ -100,6 +160,62 @@ declare module "@databricks/appkit-ui/react" {
           filings_mentioning: number;
           /** @sqlType INT */
           engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+        }>;
+      };
+    bills_became_law: {
+        name: "bills_became_law";
+        parameters: {
+          /** STRING - use sql.string() */
+          congress: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType INT */
+          congress: number;
+          /** @sqlType STRING */
+          bill_key: string;
+          /** @sqlType STRING */
+          bill_label: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType STRING */
+          title: string;
+          /** @sqlType STRING */
+          stage: string;
+          /** @sqlType BOOLEAN */
+          is_law: boolean;
+        }>;
+      };
+    bills_top: {
+        name: "bills_top";
+        parameters: {
+          /** STRING - use sql.string() */
+          congress: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType INT */
+          congress: number;
+          /** @sqlType STRING */
+          bill_key: string;
+          /** @sqlType STRING */
+          bill_label: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType STRING */
+          title: string;
+          /** @sqlType STRING */
+          stage: string;
+          /** @sqlType BOOLEAN */
+          is_law: boolean;
         }>;
       };
     client_detail: {
@@ -361,6 +477,191 @@ declare module "@databricks/appkit-ui/react" {
           client_count: number;
         }>;
       };
+    foreign_countries: {
+        name: "foreign_countries";
+        parameters: Record<string, never>;
+        result: Array<{
+          /** @sqlType STRING */
+          country: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          foreign_entity_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    foreign_country_clients: {
+        name: "foreign_country_clients";
+        parameters: {
+          /** STRING - use sql.string() */
+          country: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          country: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType STRING */
+          foreign_entity_names: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    foreign_country_detail: {
+        name: "foreign_country_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          country: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          country: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          foreign_entity_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    foreign_country_quarters: {
+        name: "foreign_country_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          country: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          country: string;
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          engagement_count: number;
+        }>;
+      };
+    government_entities: {
+        name: "government_entities";
+        parameters: Record<string, never>;
+        result: Array<{
+          /** @sqlType STRING */
+          entity_hk: string;
+          /** @sqlType STRING */
+          entity_name: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          firm_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+          /** @sqlType STRING */
+          chamber_or_agency: string;
+        }>;
+      };
+    government_entity_clients: {
+        name: "government_entity_clients";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          entity_hk: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    government_entity_detail: {
+        name: "government_entity_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          entity_hk: string;
+          /** @sqlType STRING */
+          entity_name: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          firm_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+          /** @sqlType STRING */
+          chamber_or_agency: string;
+        }>;
+      };
+    government_entity_issues: {
+        name: "government_entity_issues";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          entity_hk: string;
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    government_entity_quarters: {
+        name: "government_entity_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          entity_hk: string;
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+        }>;
+      };
     home_quarters: {
         name: "home_quarters";
         parameters: Record<string, never>;
@@ -391,6 +692,27 @@ declare module "@databricks/appkit-ui/react" {
           firm_count: number;
           /** @sqlType INT */
           rank: number;
+        }>;
+      };
+    lobbyist_affiliations: {
+        name: "lobbyist_affiliations";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          kind: string;
+          /** @sqlType STRING */
+          ref_id: string;
+          /** @sqlType STRING */
+          ref_name: string;
+          /** @sqlType STRING */
+          matched_text: string;
+          /** @sqlType STRING */
+          confidence: string;
         }>;
       };
     lobbyist_detail: {
@@ -447,6 +769,85 @@ declare module "@databricks/appkit-ui/react" {
           income_while_listed: number;
         }>;
       };
+    lobbyist_positions: {
+        name: "lobbyist_positions";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          position_text: string;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+        }>;
+      };
+    revolving_door: {
+        name: "revolving_door";
+        parameters: Record<string, never>;
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          engagement_hk: string;
+          /** @sqlType STRING */
+          full_name: string;
+          /** @sqlType STRING */
+          kind: string;
+          /** @sqlType STRING */
+          ref_name: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType BOOLEAN */
+          lobbies_former_employer: boolean;
+        }>;
+      };
+    revolving_door_all: {
+        name: "revolving_door_all";
+        parameters: Record<string, never>;
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          engagement_hk: string;
+          /** @sqlType STRING */
+          full_name: string;
+          /** @sqlType STRING */
+          kind: string;
+          /** @sqlType STRING */
+          ref_name: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType BOOLEAN */
+          lobbies_former_employer: boolean;
+          /** @sqlType STRING */
+          confidence: string;
+        }>;
+      };
     search_entities: {
         name: "search_entities";
         parameters: {
@@ -462,6 +863,100 @@ declare module "@databricks/appkit-ui/react" {
           name: string;
           /** @sqlType DOUBLE */
           total_income: number;
+        }>;
+      };
+    term_clients: {
+        name: "term_clients";
+        parameters: {
+          /** STRING - use sql.string() */
+          term: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          term: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    term_detail: {
+        name: "term_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          term: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          term: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+        }>;
+      };
+    term_issues: {
+        name: "term_issues";
+        parameters: {
+          /** STRING - use sql.string() */
+          term: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          term: string;
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+        }>;
+      };
+    term_quarters: {
+        name: "term_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          term: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          term: string;
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+        }>;
+      };
+    terms: {
+        name: "terms";
+        parameters: Record<string, never>;
+        result: Array<{
+          /** @sqlType STRING */
+          term: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
         }>;
       };
     topic_bills: {
@@ -602,6 +1097,42 @@ declare module "@databricks/appkit-ui/react" {
           client_count: number;
           /** @sqlType INT */
           firm_count: number;
+        }>;
+      };
+    trend_search: {
+        name: "trend_search";
+        parameters: {
+          /** STRING - use sql.string() */
+          q: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
+        }>;
+      };
+    trend_search_clients: {
+        name: "trend_search_clients";
+        parameters: {
+          /** STRING - use sql.string() */
+          q: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType DOUBLE */
+          income: number;
         }>;
       };
   }
