@@ -29,8 +29,13 @@ SELECT *, current_timestamp() AS load_date, 'lda.senate.gov' AS record_source
 FROM read_files('/Volumes/workspace/bronze/landing/lobbying_activities.csv', format => 'csv', header => true,
                 inferSchema => false, multiLine => true);
 
+CREATE OR REPLACE TABLE bronze.lda_government_entities AS
+SELECT *, current_timestamp() AS load_date, 'lda.senate.gov' AS record_source
+FROM read_files('/Volumes/workspace/bronze/landing/government_entities.csv', format => 'csv', header => true, inferSchema => false);
+
 SELECT 'filings' AS t, count(*) FROM bronze.lda_filings
 UNION ALL SELECT 'registrants', count(*) FROM bronze.lda_registrants
 UNION ALL SELECT 'clients', count(*) FROM bronze.lda_clients
 UNION ALL SELECT 'lobbyists', count(*) FROM bronze.lda_lobbyists
-UNION ALL SELECT 'lobbying_activities', count(*) FROM bronze.lda_lobbying_activities;
+UNION ALL SELECT 'lobbying_activities', count(*) FROM bronze.lda_lobbying_activities
+UNION ALL SELECT 'government_entities', count(*) FROM bronze.lda_government_entities;

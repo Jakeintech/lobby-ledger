@@ -49,7 +49,7 @@ def main():
             sys.exit(1)
         rows = resp.get("result", {}).get("data_array")
         if rows and not statement.upper().startswith(("INSERT", "CREATE")):
-            for row in rows[:20]:
+            for row in rows[:200]:
                 print("    ", row)
 
 
