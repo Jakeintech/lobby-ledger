@@ -52,7 +52,31 @@ Browser (React, @databricks/appkit-ui)
 
 ## Layers
 
-To be filled in as each milestone lands.
+### Bronze: source-shaped landing
+
+`ingest/pull_lda.py` samples current engagements for four firms in the TEC, FIN, HCR and TAX issue areas, then pulls every 2024-2025 filing for each engagement by `registrant_id` and `client_id`. It flattens the nested JSON into five CSVs that mirror the source entities: filings, registrants, clients, lobbyists (one row per filing and lobbyist) and lobbying_activities (one row per filing and issue). `sql/bronze.sql` uploads them to a Unity Catalog volume and creates `bronze.lda_*` with two lineage columns, `load_date` and `record_source`. Nothing is renamed or interpreted. In production this is where Qlik Replicate or Lakeflow Connect would land CDC.
+
+### Silver: Raw Vault (hard rules only)
+
+- Hubs: `hub_registrant`, `hub_client`, `hub_lobbyist`, `hub_issue`. One row per business key, with `*_hk = md5(upper(trim(bk)))`.
+- Links: `link_engagement` (registrant and client, the matter), `link_engagement_lobbyist`, `link_engagement_issue`.
+- Satellites: `sat_engagement_filing` (one row per quarterly filing, guarded by `hash_diff`), `sat_engagement_issues_text`, `sat_engagement_lobbyist_filing` (effectivity: who was listed on which filing), and profile satellites for client, registrant and lobbyist.
+- Every insert is `WHERE NOT EXISTS`, so the script is idempotent: rerun it and nothing duplicates.
+
+The proof points: several filings for one registrant and client share one `engagement_hk` and land as several satellite rows; reloading an identical filing produces the same `hash_diff` and inserts nothing.
+
+### Gold: Business Vault and marts (soft rules)
+
+- `fact_filing`: quarterly reports only, latest amendment wins, period label turned into a quarter-end date.
+- `pit_engagement`: for every engagement and quarter end, the filing that was current then. As-of questions become a simple equality join.
+- `bridge_registrant_client_lobbyist`: pre-walked hub-link-hub paths, one row per engagement, lobbyist and filing.
+- `sat_engagement_computed`: status (active or lapsed), total income, quarters active. These are the rules people argue about, so they live here and not in Silver.
+- Marts: `dim_registrant`, `dim_client`, `dim_lobbyist`, `fact_filing`, and the wide `experience_search` view with an `ai_summary` per engagement from `ai_query()`.
+- Access: `engagement_access` (user to engagement) and `experience_search_secure`, which filters on `current_user()`.
+
+### App: AppKit on Gold
+
+Three SQL files in `app/config/queries/`: `experience_search.sql` (service principal, cached), `engagement_team.obo.sql` (runs as the signed-in user) and `engagement_asof.sql` (uses the PIT table). The React page calls them through `useAnalyticsQuery`, with types generated from the SQL.
 
 ## Decisions
 
