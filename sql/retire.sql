@@ -15,6 +15,12 @@ DROP TABLE IF EXISTS gold.dim_registrant;
 DROP TABLE IF EXISTS gold.dim_client;
 DROP TABLE IF EXISTS gold.dim_lobbyist;
 
+-- The bill marts now carry the congress (bill_congress, bill_detail,
+-- bill_milestone, bill_quarter, bill_engagement). The old bill mart is
+-- dropped; lakehouse.sql replaces bill_quarter in place, so it is not
+-- dropped here and stays online between runs.
+DROP TABLE IF EXISTS gold.bill;
+
 -- sat_engagement_lobbyist_filing once held two rows for a filing and
 -- lobbyist when the covered position was filled on one issue row and
 -- empty on another. The insert now collapses those before its guard, but

@@ -1,5 +1,7 @@
 -- lakehouse.sql
--- Builds the Silver Raw Vault and the Gold marts (one per page) from Bronze.
+-- Builds the Silver Raw Vault and the Gold marts (one per page) from Bronze,
+-- including the keyword, government entity, revolving door, foreign and
+-- bill marts of the connect-the-dots addendum.
 -- Idempotent: safe to run again. Hubs, links and satellites only insert rows
 -- they have not seen; Gold is rebuilt from Silver on every run.
 -- Run with: python3 sql/run_sql.py sql/lakehouse.sql
@@ -235,6 +237,242 @@ FROM (
   FROM bronze.lda_lobbyists) s
 WHERE NOT EXISTS (SELECT 1 FROM silver.sat_lobbyist_profile t WHERE t.lobbyist_hk = s.lobbyist_hk AND t.hash_diff = s.hash_diff);
 
+-- sat_client_ppb: the client's principal place of business country, a
+-- column the source started delivering later. It lives in its own
+-- satellite so sat_client_profile keeps its hash_diff and its history.
+-- Rows only when the source delivers a value.
+CREATE TABLE IF NOT EXISTS silver.sat_client_ppb (
+  client_hk STRING, hash_diff STRING, ppb_country STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_client_ppb
+SELECT client_hk, hash_diff, ppb_country, current_timestamp(), 'lda.senate.gov'
+FROM (
+  SELECT DISTINCT md5(upper(trim(CAST(client_id AS STRING)))) AS client_hk,
+         upper(trim(ppb_country)) AS ppb_country, md5(upper(trim(ppb_country))) AS hash_diff
+  FROM bronze.lda_clients
+  WHERE ppb_country IS NOT NULL AND trim(ppb_country) <> '') s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_client_ppb t WHERE t.client_hk = s.client_hk AND t.hash_diff = s.hash_diff);
+
+-- sat_engagement_government_entity_filing: effectivity satellite saying
+-- which filing listed which government entity (under which issue code,
+-- since the link key carries the issue code). Lets Gold put a contact in
+-- its quarter instead of spreading it over the whole engagement.
+CREATE TABLE IF NOT EXISTS silver.sat_engagement_government_entity_filing (
+  engagement_entity_hk STRING, filing_uuid STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_engagement_government_entity_filing
+SELECT s.engagement_entity_hk, s.filing_uuid, current_timestamp(), 'lda.senate.gov'
+FROM (
+  SELECT DISTINCT md5(concat_ws('||', f.engagement_hk, md5(upper(trim(g.entity_name))), upper(trim(g.general_issue_code)))) AS engagement_entity_hk,
+         f.filing_uuid
+  FROM bronze.lda_government_entities g JOIN silver.v_filing_keys f ON f.filing_uuid = trim(g.filing_uuid)
+  WHERE g.entity_name IS NOT NULL) s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_engagement_government_entity_filing t
+                  WHERE t.filing_uuid = s.filing_uuid AND t.engagement_entity_hk = s.engagement_entity_hk);
+
+-- hub_foreign_entity: one row per foreign entity a filing names as holding
+-- an interest in, or contributing to, the client. The name is the business key.
+CREATE TABLE IF NOT EXISTS silver.hub_foreign_entity (
+  foreign_entity_hk STRING, foreign_entity_bk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.hub_foreign_entity
+SELECT DISTINCT md5(upper(trim(name))), upper(trim(name)), current_timestamp(), 'lda.senate.gov'
+FROM bronze.lda_foreign_entities s
+WHERE name IS NOT NULL AND trim(name) <> ''
+  AND NOT EXISTS (SELECT 1 FROM silver.hub_foreign_entity h WHERE h.foreign_entity_hk = md5(upper(trim(s.name))));
+
+-- link_engagement_foreign_entity: which foreign entities an engagement has
+-- ever named. The filing-level detail sits in sat_foreign_entity_filing.
+CREATE TABLE IF NOT EXISTS silver.link_engagement_foreign_entity (
+  engagement_foreign_entity_hk STRING, engagement_hk STRING, foreign_entity_hk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.link_engagement_foreign_entity
+SELECT DISTINCT md5(concat_ws('||', f.engagement_hk, md5(upper(trim(x.name))))),
+       f.engagement_hk, md5(upper(trim(x.name))), current_timestamp(), 'lda.senate.gov'
+FROM bronze.lda_foreign_entities x JOIN silver.v_filing_keys f ON f.filing_uuid = trim(x.filing_uuid)
+WHERE x.name IS NOT NULL AND trim(x.name) <> ''
+  AND NOT EXISTS (SELECT 1 FROM silver.link_engagement_foreign_entity l WHERE l.engagement_foreign_entity_hk =
+    md5(concat_ws('||', f.engagement_hk, md5(upper(trim(x.name))))));
+
+-- sat_foreign_entity_filing: one row per filing and foreign entity with
+-- the country, principal place of business, ownership share and
+-- contribution as disclosed on that filing.
+CREATE TABLE IF NOT EXISTS silver.sat_foreign_entity_filing (
+  engagement_foreign_entity_hk STRING, filing_uuid STRING, country STRING, ppb_country STRING,
+  ownership_percentage DECIMAL(7,2), contribution DECIMAL(14,2), load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_foreign_entity_filing
+SELECT s.engagement_foreign_entity_hk, s.filing_uuid, s.country, s.ppb_country, s.ownership_percentage, s.contribution,
+       current_timestamp(), 'lda.senate.gov'
+FROM (
+  SELECT md5(concat_ws('||', f.engagement_hk, md5(upper(trim(x.name))))) AS engagement_foreign_entity_hk, f.filing_uuid,
+         max(nullif(upper(trim(x.country)), '')) AS country, max(nullif(upper(trim(x.ppb_country)), '')) AS ppb_country,
+         max(CAST(x.ownership_percentage AS DECIMAL(7,2))) AS ownership_percentage,
+         max(CAST(x.contribution AS DECIMAL(14,2))) AS contribution
+  FROM bronze.lda_foreign_entities x JOIN silver.v_filing_keys f ON f.filing_uuid = trim(x.filing_uuid)
+  WHERE x.name IS NOT NULL AND trim(x.name) <> ''
+  GROUP BY 1, 2) s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_foreign_entity_filing t
+                  WHERE t.filing_uuid = s.filing_uuid AND t.engagement_foreign_entity_hk = s.engagement_foreign_entity_hk);
+
+-- hub_affiliated_organization, link_engagement_affiliated_organization,
+-- sat_affiliated_organization_filing: the organizations a filing says
+-- contribute to or plan the client's lobbying, same shape as the foreign
+-- entity objects.
+CREATE TABLE IF NOT EXISTS silver.hub_affiliated_organization (
+  organization_hk STRING, organization_bk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.hub_affiliated_organization
+SELECT DISTINCT md5(upper(trim(name))), upper(trim(name)), current_timestamp(), 'lda.senate.gov'
+FROM bronze.lda_affiliated_organizations s
+WHERE name IS NOT NULL AND trim(name) <> ''
+  AND NOT EXISTS (SELECT 1 FROM silver.hub_affiliated_organization h WHERE h.organization_hk = md5(upper(trim(s.name))));
+
+CREATE TABLE IF NOT EXISTS silver.link_engagement_affiliated_organization (
+  engagement_organization_hk STRING, engagement_hk STRING, organization_hk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.link_engagement_affiliated_organization
+SELECT DISTINCT md5(concat_ws('||', f.engagement_hk, md5(upper(trim(x.name))))),
+       f.engagement_hk, md5(upper(trim(x.name))), current_timestamp(), 'lda.senate.gov'
+FROM bronze.lda_affiliated_organizations x JOIN silver.v_filing_keys f ON f.filing_uuid = trim(x.filing_uuid)
+WHERE x.name IS NOT NULL AND trim(x.name) <> ''
+  AND NOT EXISTS (SELECT 1 FROM silver.link_engagement_affiliated_organization l WHERE l.engagement_organization_hk =
+    md5(concat_ws('||', f.engagement_hk, md5(upper(trim(x.name))))));
+
+CREATE TABLE IF NOT EXISTS silver.sat_affiliated_organization_filing (
+  engagement_organization_hk STRING, filing_uuid STRING, name STRING, country STRING, ppb_country STRING,
+  load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_affiliated_organization_filing
+SELECT s.engagement_organization_hk, s.filing_uuid, s.name, s.country, s.ppb_country, current_timestamp(), 'lda.senate.gov'
+FROM (
+  SELECT md5(concat_ws('||', f.engagement_hk, md5(upper(trim(x.name))))) AS engagement_organization_hk, f.filing_uuid,
+         max(trim(x.name)) AS name, max(nullif(upper(trim(x.country)), '')) AS country,
+         max(nullif(upper(trim(x.ppb_country)), '')) AS ppb_country
+  FROM bronze.lda_affiliated_organizations x JOIN silver.v_filing_keys f ON f.filing_uuid = trim(x.filing_uuid)
+  WHERE x.name IS NOT NULL AND trim(x.name) <> ''
+  GROUP BY 1, 2) s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_affiliated_organization_filing t
+                  WHERE t.filing_uuid = s.filing_uuid AND t.engagement_organization_hk = s.engagement_organization_hk);
+
+-- hub_legislator / sat_legislator_profile: every current and historical
+-- member of Congress from the unitedstates project, keyed by bioguide id.
+-- The profile keeps the name parts the revolving-door match reads, the
+-- chamber (type is sen or rep), state, party, district and senate class
+-- as delivered, and is_current.
+CREATE TABLE IF NOT EXISTS silver.hub_legislator (
+  legislator_hk STRING, legislator_bk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.hub_legislator
+SELECT DISTINCT md5(upper(trim(bioguide_id))), upper(trim(bioguide_id)), current_timestamp(), 'unitedstates/congress-legislators'
+FROM bronze.ref_legislators s
+WHERE bioguide_id IS NOT NULL AND trim(bioguide_id) <> ''
+  AND NOT EXISTS (SELECT 1 FROM silver.hub_legislator h WHERE h.legislator_hk = md5(upper(trim(s.bioguide_id))));
+
+CREATE TABLE IF NOT EXISTS silver.sat_legislator_profile (
+  legislator_hk STRING, hash_diff STRING, full_name STRING, last_name STRING, first_name STRING, nickname STRING,
+  type STRING, state STRING, district STRING, senate_class STRING, party STRING, is_current BOOLEAN,
+  load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_legislator_profile
+SELECT legislator_hk, hash_diff, full_name, last_name, first_name, nickname, type, state, district, senate_class, party,
+       is_current, current_timestamp(), 'unitedstates/congress-legislators'
+FROM (
+  SELECT DISTINCT md5(upper(trim(bioguide_id))) AS legislator_hk,
+         trim(full_name) AS full_name, trim(last_name) AS last_name, trim(first_name) AS first_name,
+         nullif(trim(nickname), '') AS nickname, lower(trim(type)) AS type, upper(trim(state)) AS state,
+         nullif(trim(district), '') AS district, nullif(trim(senate_class), '') AS senate_class, trim(party) AS party,
+         is_current,
+         md5(concat_ws('||', trim(full_name), trim(last_name), trim(first_name), coalesce(trim(nickname), ''),
+                       lower(trim(type)), upper(trim(state)), coalesce(trim(district), ''),
+                       coalesce(trim(senate_class), ''), coalesce(trim(party), ''), CAST(is_current AS STRING))) AS hash_diff
+  FROM bronze.ref_legislators
+  WHERE bioguide_id IS NOT NULL AND trim(bioguide_id) <> '') s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_legislator_profile t WHERE t.legislator_hk = s.legislator_hk AND t.hash_diff = s.hash_diff);
+
+-- hub_committee / sat_committee_profile: congressional committees and
+-- subcommittees keyed by thomas id (HSWM is House Ways and Means).
+CREATE TABLE IF NOT EXISTS silver.hub_committee (
+  committee_hk STRING, committee_bk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.hub_committee
+SELECT DISTINCT md5(upper(trim(thomas_id))), upper(trim(thomas_id)), current_timestamp(), 'unitedstates/congress-legislators'
+FROM bronze.ref_committees s
+WHERE thomas_id IS NOT NULL AND trim(thomas_id) <> ''
+  AND NOT EXISTS (SELECT 1 FROM silver.hub_committee h WHERE h.committee_hk = md5(upper(trim(s.thomas_id))));
+
+CREATE TABLE IF NOT EXISTS silver.sat_committee_profile (
+  committee_hk STRING, hash_diff STRING, name STRING, chamber STRING, parent_id STRING,
+  load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_committee_profile
+SELECT committee_hk, hash_diff, name, chamber, parent_id, current_timestamp(), 'unitedstates/congress-legislators'
+FROM (
+  SELECT DISTINCT md5(upper(trim(thomas_id))) AS committee_hk, trim(name) AS name, lower(trim(chamber)) AS chamber,
+         nullif(upper(trim(parent_id)), '') AS parent_id,
+         md5(concat_ws('||', trim(name), lower(trim(chamber)), coalesce(upper(trim(parent_id)), ''))) AS hash_diff
+  FROM bronze.ref_committees
+  WHERE thomas_id IS NOT NULL AND trim(thomas_id) <> '') s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_committee_profile t WHERE t.committee_hk = s.committee_hk AND t.hash_diff = s.hash_diff);
+
+-- hub_bill: one row per bill the Congress.gov pull returned, keyed by
+-- congress and the normalized bill key (118, HR1). Both parts are kept
+-- as columns so Gold can join on them without unpacking the business key.
+CREATE TABLE IF NOT EXISTS silver.hub_bill (
+  bill_hk STRING, bill_bk STRING, congress INT, bill_key STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.hub_bill
+SELECT DISTINCT md5(concat_ws('||', trim(congress), upper(trim(bill_key)))),
+       concat_ws('||', trim(congress), upper(trim(bill_key))), CAST(trim(congress) AS INT), upper(trim(bill_key)),
+       current_timestamp(), 'api.congress.gov'
+FROM bronze.congress_bills s
+WHERE congress IS NOT NULL AND bill_key IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM silver.hub_bill h WHERE h.bill_hk = md5(concat_ws('||', trim(s.congress), upper(trim(s.bill_key)))));
+
+-- sat_bill_detail: title, sponsor, policy area and latest action as
+-- Congress.gov reports them, a new row only when something changes.
+CREATE TABLE IF NOT EXISTS silver.sat_bill_detail (
+  bill_hk STRING, hash_diff STRING, title STRING, policy_area STRING, sponsor_bioguide_id STRING, sponsor_name STRING,
+  sponsor_party STRING, sponsor_state STRING, introduced_date DATE, latest_action_date DATE, latest_action_text STRING,
+  is_law BOOLEAN, congress_url STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_bill_detail
+SELECT bill_hk, hash_diff, title, policy_area, sponsor_bioguide_id, sponsor_name, sponsor_party, sponsor_state,
+       introduced_date, latest_action_date, latest_action_text, is_law, congress_url, current_timestamp(), 'api.congress.gov'
+FROM (
+  SELECT DISTINCT md5(concat_ws('||', trim(congress), upper(trim(bill_key)))) AS bill_hk,
+         trim(title) AS title, nullif(trim(policy_area), '') AS policy_area,
+         nullif(upper(trim(sponsor_bioguide_id)), '') AS sponsor_bioguide_id, nullif(trim(sponsor_name), '') AS sponsor_name,
+         nullif(trim(sponsor_party), '') AS sponsor_party, nullif(upper(trim(sponsor_state)), '') AS sponsor_state,
+         CAST(introduced_date AS DATE) AS introduced_date, CAST(latest_action_date AS DATE) AS latest_action_date,
+         nullif(trim(latest_action_text), '') AS latest_action_text,
+         coalesce(CAST(lower(trim(is_law)) AS BOOLEAN), false) AS is_law, trim(congress_url) AS congress_url,
+         md5(concat_ws('||', coalesce(trim(title), ''), coalesce(trim(policy_area), ''), coalesce(upper(trim(sponsor_bioguide_id)), ''),
+                       coalesce(trim(sponsor_name), ''), coalesce(trim(sponsor_party), ''), coalesce(upper(trim(sponsor_state)), ''),
+                       coalesce(trim(introduced_date), ''), coalesce(trim(latest_action_date), ''),
+                       coalesce(trim(latest_action_text), ''), coalesce(lower(trim(is_law)), ''), coalesce(trim(congress_url), ''))) AS hash_diff
+  FROM bronze.congress_bills
+  WHERE congress IS NOT NULL AND bill_key IS NOT NULL) s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_bill_detail t WHERE t.bill_hk = s.bill_hk AND t.hash_diff = s.hash_diff);
+
+-- sat_bill_action: one row per recorded action on a bill. hash_diff is
+-- the md5 of the action itself, so a reload inserts nothing.
+CREATE TABLE IF NOT EXISTS silver.sat_bill_action (
+  bill_hk STRING, hash_diff STRING, action_date DATE, action_code STRING, action_type STRING, source_system STRING,
+  text STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.sat_bill_action
+SELECT bill_hk, hash_diff, action_date, action_code, action_type, source_system, text, current_timestamp(), 'api.congress.gov'
+FROM (
+  SELECT DISTINCT md5(concat_ws('||', trim(congress), upper(trim(bill_key)))) AS bill_hk,
+         CAST(action_date AS DATE) AS action_date, nullif(trim(action_code), '') AS action_code,
+         nullif(trim(action_type), '') AS action_type, nullif(trim(source_system), '') AS source_system, trim(text) AS text,
+         md5(concat_ws('||', coalesce(trim(action_date), ''), coalesce(trim(action_code), ''), coalesce(trim(action_type), ''),
+                       coalesce(trim(source_system), ''), coalesce(trim(text), ''))) AS hash_diff
+  FROM bronze.congress_bill_actions
+  WHERE congress IS NOT NULL AND bill_key IS NOT NULL) s
+WHERE NOT EXISTS (SELECT 1 FROM silver.sat_bill_action t WHERE t.bill_hk = s.bill_hk AND t.hash_diff = s.hash_diff);
+
 -- =====================================================================
 -- GOLD: BUSINESS RULES (soft rules start here)
 -- =====================================================================
@@ -362,6 +600,9 @@ LEFT JOIN (SELECT filing_uuid, array_join(array_sort(collect_set(bill_label)), '
 -- engagement: one row per registrant-client pair with everything the
 -- engagement table shows. Covers every link_engagement row, including
 -- one that has only registered so far.
+-- foreign_entity_names lists every foreign entity the engagement has
+-- named, and client_ppb_country is the client's principal place of
+-- business as last reported.
 CREATE OR REPLACE TABLE gold.engagement AS
 WITH newest AS (SELECT max(period_end_date) AS newest_period FROM gold.fact_filing),
 client_profile AS (
@@ -387,7 +628,15 @@ entities AS (
   SELECT l.engagement_hk, array_join(array_sort(collect_set(h.entity_bk)), ', ') AS government_entities
   FROM silver.link_engagement_government_entity l
   JOIN silver.hub_government_entity h ON h.entity_hk = l.entity_hk
-  GROUP BY l.engagement_hk)
+  GROUP BY l.engagement_hk),
+foreign_names AS (
+  SELECT l.engagement_hk, array_join(array_sort(collect_set(h.foreign_entity_bk)), ', ') AS foreign_entity_names
+  FROM silver.link_engagement_foreign_entity l
+  JOIN silver.hub_foreign_entity h ON h.foreign_entity_hk = l.foreign_entity_hk
+  GROUP BY l.engagement_hk),
+client_ppb AS (
+  SELECT client_hk, ppb_country FROM silver.sat_client_ppb
+  QUALIFY row_number() OVER (PARTITION BY client_hk ORDER BY load_date DESC, hash_diff) = 1)
 SELECT e.engagement_hk,
        hc.client_bk AS client_id, cp.name AS client, cp.general_description AS client_description,
        hr.registrant_bk AS registrant_id, fp.name AS firm,
@@ -400,7 +649,8 @@ SELECT e.engagement_hk,
             WHEN lr.is_termination THEN 'lapsed'
             WHEN r.last_period < n.newest_period THEN 'lapsed'
             ELSE 'active' END AS engagement_status,
-       a.ai_summary
+       a.ai_summary,
+       fn.foreign_entity_names, cpp.ppb_country AS client_ppb_country
 FROM silver.link_engagement e
 CROSS JOIN newest n
 JOIN silver.hub_client hc ON hc.client_hk = e.client_hk
@@ -413,7 +663,9 @@ LEFT JOIN entities g ON g.engagement_hk = e.engagement_hk
 LEFT JOIN reports r ON r.engagement_hk = e.engagement_hk
 LEFT JOIN registered reg ON reg.engagement_hk = e.engagement_hk
 LEFT JOIN last_report lr ON lr.engagement_hk = e.engagement_hk
-LEFT JOIN gold.engagement_ai_summary a ON a.engagement_hk = e.engagement_hk;
+LEFT JOIN gold.engagement_ai_summary a ON a.engagement_hk = e.engagement_hk
+LEFT JOIN foreign_names fn ON fn.engagement_hk = e.engagement_hk
+LEFT JOIN client_ppb cpp ON cpp.client_hk = e.client_hk;
 
 -- topic_quarter: income by issue code and quarter. Built by exploding
 -- engagement_quarter on its issue codes (rule 1), so a quarter with a
@@ -486,24 +738,113 @@ SELECT issue_code, bill_key, max(bill_label) AS bill_label,
 FROM gold.filing_bill
 GROUP BY issue_code, bill_key;
 
--- bill: one row per bill cited anywhere in the issue text.
-CREATE OR REPLACE TABLE gold.bill AS
-SELECT bill_key, max(bill_label) AS bill_label,
+-- ---------------------------------------------------------------------
+-- Bills with their legislative story. Rules, stated once:
+--   a. The congress a mention belongs to comes from the filing year:
+--      congress = (filing_year - 1789) / 2 + 1, so 2024 is the 118th and
+--      2025 the 119th. That resolves H.R. 1 of one congress from the next.
+--   b. A filing that mentions a bill counts once toward it, and its
+--      income counts in full (rule 1); a registration counts as a mention
+--      with no quarter and no income.
+--   c. Milestones come from the Congress.gov actions by action code and
+--      text, the earliest date for each: introduced (1000, 10000,
+--      Intro-H, Intro-S, "Introduced in ..."), reported (5000, 14000,
+--      H12200, H12210, "Reported ..."), passed_house (8000, H37300,
+--      H37100, H38310, "Passed/agreed to in House", "On passage Passed",
+--      "On motion to suspend the rules and pass ... Agreed to"),
+--      passed_senate (17000, "Passed/agreed to in Senate", "Passed
+--      Senate"), to_president (28000, E30000, "Presented to President"),
+--      became_law (36000, E40000, "Became Public Law").
+--   d. stage reads the milestones: law when it became law (or Congress.gov
+--      says is_law), passed both when both chambers passed it, passed one
+--      chamber, in committee when a committee reported it, else introduced.
+-- ---------------------------------------------------------------------
+
+-- bill_mention: filing_bill with the congress, the income and the client
+-- and firm attached, one row per filing, issue code and bill.
+CREATE OR REPLACE TABLE gold.bill_mention AS
+WITH filing_year AS (
+  SELECT filing_uuid, max(filing_year) AS filing_year FROM silver.sat_engagement_filing GROUP BY filing_uuid)
+SELECT CAST(floor((y.filing_year - 1789) / 2) + 1 AS INT) AS congress,
+       fb.bill_key, fb.bill_label, fb.filing_uuid, fb.engagement_hk, fb.issue_code, fb.period_end_date,
+       CAST(coalesce(f.income, 0) AS DECIMAL(14,2)) AS income
+FROM gold.filing_bill fb
+JOIN filing_year y ON y.filing_uuid = fb.filing_uuid
+LEFT JOIN gold.fact_filing f ON f.filing_uuid = fb.filing_uuid;
+
+-- bill_congress: one row per congress and bill cited anywhere in the
+-- issue text. ingest/pull_bills.py reads this for the keys to fetch.
+CREATE OR REPLACE TABLE gold.bill_congress AS
+SELECT congress, bill_key, max(bill_label) AS bill_label,
        CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count,
        CAST(count(DISTINCT filing_uuid) AS INT) AS filings_mentioning,
-       min(period_end_date) AS first_period, max(period_end_date) AS last_period,
-       array_join(array_sort(collect_set(issue_code)), ', ') AS issue_codes
-FROM gold.filing_bill
-GROUP BY bill_key;
+       CAST(sum(income) AS DECIMAL(14,2)) AS income
+FROM (SELECT DISTINCT congress, bill_key, bill_label, engagement_hk, filing_uuid, income FROM gold.bill_mention)
+GROUP BY congress, bill_key;
 
--- bill_quarter: how many quarterly reports cited the bill each quarter.
+-- bill_milestone: one row per bill and milestone reached, earliest date.
+CREATE OR REPLACE TABLE gold.bill_milestone AS
+SELECT h.congress, h.bill_key, t.milestone, min(a.action_date) AS milestone_date
+FROM silver.sat_bill_action a
+JOIN silver.hub_bill h ON h.bill_hk = a.bill_hk
+JOIN LATERAL (SELECT
+  CASE WHEN a.action_code IN ('1000', '10000', 'Intro-H', 'Intro-S') OR a.text RLIKE '^Introduced in (the )?(House|Senate)' THEN 'introduced'
+       WHEN a.action_code IN ('5000', '14000', 'H12200', 'H12210') OR a.text RLIKE '^(Reported (by|to|\\()|Committee on [^.]*\\. Reported)' THEN 'reported'
+       WHEN a.action_code IN ('8000', 'H37300', 'H37100', 'H38310')
+            OR a.text RLIKE '^(Passed/agreed to in House|On passage Passed|On motion to suspend the rules and pass.*Agreed to|Passed House)' THEN 'passed_house'
+       WHEN a.action_code = '17000' OR a.text RLIKE '^(Passed/agreed to in Senate|Passed Senate)' THEN 'passed_senate'
+       WHEN a.action_code IN ('28000', 'E30000') OR a.text RLIKE '^Presented to President' THEN 'to_president'
+       WHEN a.action_code IN ('36000', 'E40000') OR a.text RLIKE '^Became Public Law' THEN 'became_law' END AS milestone) t
+WHERE t.milestone IS NOT NULL AND a.action_date IS NOT NULL
+GROUP BY h.congress, h.bill_key, t.milestone;
+
+-- bill_detail: the Congress.gov record of a bill with the lobbying totals
+-- and the stage it reached. Only bills the pull returned have a row.
+CREATE OR REPLACE TABLE gold.bill_detail AS
+WITH detail AS (
+  SELECT * FROM silver.sat_bill_detail
+  QUALIFY row_number() OVER (PARTITION BY bill_hk ORDER BY load_date DESC, hash_diff) = 1),
+reached AS (
+  SELECT congress, bill_key,
+         max(CASE WHEN milestone = 'reported' THEN milestone_date END) AS reported,
+         max(CASE WHEN milestone = 'passed_house' THEN milestone_date END) AS passed_house,
+         max(CASE WHEN milestone = 'passed_senate' THEN milestone_date END) AS passed_senate,
+         max(CASE WHEN milestone = 'became_law' THEN milestone_date END) AS became_law
+  FROM gold.bill_milestone GROUP BY congress, bill_key)
+SELECT h.congress, h.bill_key, coalesce(b.bill_label, h.bill_key) AS bill_label,
+       d.title, d.policy_area, d.sponsor_bioguide_id, d.sponsor_name, d.sponsor_party, d.sponsor_state,
+       d.introduced_date, d.latest_action_date, d.latest_action_text, d.is_law, d.congress_url,
+       CAST(coalesce(b.engagement_count, 0) AS INT) AS engagement_count,
+       CAST(coalesce(b.filings_mentioning, 0) AS INT) AS filings_mentioning,
+       CAST(coalesce(b.income, 0) AS DECIMAL(14,2)) AS income,
+       CASE WHEN d.is_law OR r.became_law IS NOT NULL THEN 'law'
+            WHEN r.passed_house IS NOT NULL AND r.passed_senate IS NOT NULL THEN 'passed both'
+            WHEN r.passed_house IS NOT NULL OR r.passed_senate IS NOT NULL THEN 'passed one chamber'
+            WHEN r.reported IS NOT NULL THEN 'in committee'
+            ELSE 'introduced' END AS stage
+FROM silver.hub_bill h
+JOIN detail d ON d.bill_hk = h.bill_hk
+LEFT JOIN gold.bill_congress b ON b.congress = h.congress AND b.bill_key = h.bill_key
+LEFT JOIN reached r ON r.congress = h.congress AND r.bill_key = h.bill_key;
+
+-- bill_quarter: mentions and income by bill and quarter.
 CREATE OR REPLACE TABLE gold.bill_quarter AS
-SELECT bill_key, period_end_date,
+SELECT congress, bill_key, period_end_date,
        CAST(count(DISTINCT filing_uuid) AS INT) AS filings_mentioning,
-       CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count
-FROM gold.filing_bill
+       CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count,
+       CAST(sum(income) AS DECIMAL(14,2)) AS income
+FROM (SELECT DISTINCT congress, bill_key, engagement_hk, filing_uuid, period_end_date, income FROM gold.bill_mention)
 WHERE period_end_date IS NOT NULL
-GROUP BY bill_key, period_end_date;
+GROUP BY congress, bill_key, period_end_date;
+
+-- bill_engagement: one row per bill and engagement that lobbied on it.
+CREATE OR REPLACE TABLE gold.bill_engagement AS
+SELECT m.congress, m.bill_key, m.engagement_hk, g.client_id, g.client, g.registrant_id, g.firm,
+       min(m.period_end_date) AS first_period, max(m.period_end_date) AS last_period,
+       CAST(count(DISTINCT m.filing_uuid) AS INT) AS filings_mentioning
+FROM gold.bill_mention m
+JOIN gold.engagement g ON g.engagement_hk = m.engagement_hk
+GROUP BY m.congress, m.bill_key, m.engagement_hk, g.client_id, g.client, g.registrant_id, g.firm;
 
 -- client: one row per client with the firms it hired and its totals.
 CREATE OR REPLACE TABLE gold.client AS
@@ -600,37 +941,441 @@ JOIN silver.link_engagement e ON e.engagement_hk = q.engagement_hk
 JOIN silver.hub_registrant hr ON hr.registrant_hk = e.registrant_hk
 GROUP BY hr.registrant_bk, q.period_end_date;
 
--- lobbyist: one row per individual lobbyist. covered_positions is the
--- disclosed former government roles, verbatim from the filings, distinct
--- and joined with ' | '. Quarters count the quarterly reports that list
--- the person, so someone named only on a registration has 0.
-CREATE OR REPLACE TABLE gold.lobbyist AS
-WITH profile AS (
-  SELECT lobbyist_hk, first_name, last_name FROM silver.sat_lobbyist_profile
-  QUALIFY row_number() OVER (PARTITION BY lobbyist_hk ORDER BY load_date DESC, hash_diff) = 1),
-listed AS (
-  SELECT ll.lobbyist_hk, e.client_hk, e.registrant_hk, f.period_end_date, sf.covered_position
-  FROM silver.link_engagement_lobbyist ll
-  JOIN silver.link_engagement e ON e.engagement_hk = ll.engagement_hk
-  JOIN silver.sat_engagement_lobbyist_filing sf ON sf.engagement_lobbyist_hk = ll.engagement_lobbyist_hk
-  LEFT JOIN gold.fact_filing f ON f.filing_uuid = sf.filing_uuid),
-agg AS (
-  SELECT lobbyist_hk,
-         count(DISTINCT client_hk) AS client_count, count(DISTINCT registrant_hk) AS firm_count,
-         count(DISTINCT period_end_date) AS quarters_active,
-         min(period_end_date) AS first_period, max(period_end_date) AS last_period,
-         nullif(array_join(array_sort(collect_set(nullif(trim(covered_position), ''))), ' | '), '') AS covered_positions
-  FROM listed GROUP BY lobbyist_hk)
-SELECT hl.lobbyist_bk AS lobbyist_id,
-       initcap(concat_ws(' ', p.first_name, p.last_name)) AS full_name,
-       a.covered_positions,
-       CAST(coalesce(a.client_count, 0) AS INT) AS client_count,
-       CAST(coalesce(a.firm_count, 0) AS INT) AS firm_count,
-       CAST(coalesce(a.quarters_active, 0) AS INT) AS quarters_active,
-       a.first_period, a.last_period
-FROM silver.hub_lobbyist hl
-LEFT JOIN profile p ON p.lobbyist_hk = hl.lobbyist_hk
-LEFT JOIN agg a ON a.lobbyist_hk = hl.lobbyist_hk;
+-- ---------------------------------------------------------------------
+-- Keyword trends. Rules, stated once:
+--   a. The searchable text is the specific-issues text of the winning
+--      version of each quarterly report (rule 3), lower-cased. One row per
+--      filing and issue code.
+--   b. A term matches a filing when the lower-cased text of any of its
+--      issue codes contains the term (LIKE '%term%'), so "tariff" also
+--      matches "tariffs".
+--   c. A filing that mentions a term counts once toward that term however
+--      many issue codes mention it, and its income counts in full (rule 1).
+-- ---------------------------------------------------------------------
+
+-- activity_text: the live-search table. Any phrase the curated list does
+-- not cover is charted by querying this table directly.
+CREATE OR REPLACE TABLE gold.activity_text AS
+SELECT f.filing_uuid, f.engagement_hk, f.period_end_date, t.issue_code, f.income,
+       lower(t.specific_issues) AS text_lower
+FROM silver.sat_engagement_issues_text t
+JOIN gold.fact_filing f ON f.filing_uuid = t.filing_uuid
+WHERE t.specific_issues IS NOT NULL AND trim(t.specific_issues) <> ''
+QUALIFY row_number() OVER (PARTITION BY t.filing_uuid, t.issue_code ORDER BY t.load_date DESC, t.hash_diff) = 1;
+
+-- curated_term: the curated list, stated here only. term carries one row
+-- per curated term whether or not any filing mentions it, so a tile on
+-- /trends renders for every term.
+CREATE OR REPLACE TABLE gold.curated_term AS
+SELECT term FROM VALUES
+  ('artificial intelligence'), ('data center'), ('semiconductor'), ('tariff'), ('stablecoin'),
+  ('cryptocurrency'), ('pfas'), ('medicare advantage'), ('drug pricing'), ('electric vehicle'),
+  ('nuclear'), ('lng'), ('permitting'), ('child tax credit'), ('endowment tax'),
+  ('antitrust'), ('section 230'), ('tiktok'), ('drone'), ('ukraine'),
+  ('israel'), ('broadband'), ('340b'), ('medicaid'), ('farm bill'),
+  ('highway'), ('housing'), ('tax credit'), ('one big beautiful bill'), ('ndaa') AS t(term);
+
+-- term_hit: the curated terms matched against activity_text, one row per
+-- term, filing and issue code.
+CREATE OR REPLACE TABLE gold.term_hit AS
+SELECT c.term, a.filing_uuid, a.engagement_hk, a.period_end_date, a.issue_code, a.income
+FROM gold.activity_text a
+JOIN gold.curated_term c ON a.text_lower LIKE concat('%', c.term, '%');
+
+-- term: one row per curated term; zeros and null periods when nothing
+-- mentions it yet.
+CREATE OR REPLACE TABLE gold.term AS
+WITH hit AS (
+  SELECT term,
+         count(*) AS filings_mentioning,
+         count(DISTINCT engagement_hk) AS engagement_count,
+         sum(income) AS income,
+         min(period_end_date) AS first_period, max(period_end_date) AS last_period
+  FROM (SELECT term, filing_uuid, engagement_hk, period_end_date, max(income) AS income
+        FROM gold.term_hit GROUP BY term, filing_uuid, engagement_hk, period_end_date)
+  GROUP BY term)
+SELECT c.term,
+       CAST(coalesce(h.filings_mentioning, 0) AS INT) AS filings_mentioning,
+       CAST(coalesce(h.engagement_count, 0) AS INT) AS engagement_count,
+       CAST(coalesce(h.income, 0) AS DECIMAL(14,2)) AS income,
+       h.first_period, h.last_period
+FROM gold.curated_term c
+LEFT JOIN hit h ON h.term = c.term;
+
+-- term_quarter: mentions and income by term and quarter. Sums to term.
+CREATE OR REPLACE TABLE gold.term_quarter AS
+SELECT term, period_end_date,
+       CAST(count(*) AS INT) AS filings_mentioning,
+       CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count,
+       CAST(sum(income) AS DECIMAL(14,2)) AS income
+FROM (SELECT term, filing_uuid, engagement_hk, period_end_date, max(income) AS income
+      FROM gold.term_hit GROUP BY term, filing_uuid, engagement_hk, period_end_date)
+GROUP BY term, period_end_date;
+
+-- term_client: clients ranked by income within a term.
+CREATE OR REPLACE TABLE gold.term_client AS
+SELECT term, client_id, client, filings_mentioning, income,
+       CAST(row_number() OVER (PARTITION BY term ORDER BY income DESC, filings_mentioning DESC, client, client_id) AS INT) AS rank
+FROM (
+  SELECT h.term, g.client_id, g.client,
+         CAST(count(*) AS INT) AS filings_mentioning, CAST(sum(h.income) AS DECIMAL(14,2)) AS income
+  FROM (SELECT term, filing_uuid, engagement_hk, max(income) AS income
+        FROM gold.term_hit GROUP BY term, filing_uuid, engagement_hk) h
+  JOIN gold.engagement g ON g.engagement_hk = h.engagement_hk
+  GROUP BY h.term, g.client_id, g.client);
+
+-- term_issue: which issue codes the mentions fall under.
+CREATE OR REPLACE TABLE gold.term_issue AS
+SELECT term, issue_code, CAST(count(DISTINCT filing_uuid) AS INT) AS filings_mentioning
+FROM gold.term_hit
+GROUP BY term, issue_code;
+
+-- ---------------------------------------------------------------------
+-- Who gets lobbied. Rules, stated once:
+--   a. A filing's income counts in full toward every government entity it
+--      lists (rule 1), and once per entity however many issue codes list
+--      the entity on that filing.
+--   b. Only quarterly reports carry contacts into quarters and income;
+--      engagement, client and firm counts come from every filing,
+--      registrations included.
+--   c. chamber_or_agency reads the entity name: White House for the
+--      White House, the Executive Office of the President and the Office
+--      of the Vice President; House for the House of Representatives;
+--      Senate for the Senate; Agency for everything else.
+-- ---------------------------------------------------------------------
+
+-- government_entity_contact: one row per entity, filing and issue code
+-- on a quarterly report. Feeds the four government entity marts.
+CREATE OR REPLACE TABLE gold.government_entity_contact AS
+SELECT DISTINCT l.entity_hk, l.engagement_hk, l.issue_code, f.filing_uuid, f.period_end_date, f.income
+FROM silver.sat_engagement_government_entity_filing s
+JOIN silver.link_engagement_government_entity l ON l.engagement_entity_hk = s.engagement_entity_hk
+JOIN gold.fact_filing f ON f.filing_uuid = s.filing_uuid;
+
+-- government_entity: one row per agency or chamber ever listed as contacted.
+CREATE OR REPLACE TABLE gold.government_entity AS
+WITH linked AS (
+  SELECT l.entity_hk, count(DISTINCT l.engagement_hk) AS engagement_count,
+         count(DISTINCT e.client_hk) AS client_count, count(DISTINCT e.registrant_hk) AS firm_count
+  FROM silver.link_engagement_government_entity l
+  JOIN silver.link_engagement e ON e.engagement_hk = l.engagement_hk
+  GROUP BY l.entity_hk),
+reported AS (
+  SELECT entity_hk, sum(income) AS income
+  FROM (SELECT DISTINCT entity_hk, filing_uuid, income FROM gold.government_entity_contact)
+  GROUP BY entity_hk)
+SELECT h.entity_hk, h.entity_bk AS entity_name,
+       CAST(coalesce(l.engagement_count, 0) AS INT) AS engagement_count,
+       CAST(coalesce(l.client_count, 0) AS INT) AS client_count,
+       CAST(coalesce(l.firm_count, 0) AS INT) AS firm_count,
+       CAST(coalesce(r.income, 0) AS DECIMAL(14,2)) AS income,
+       CAST(row_number() OVER (ORDER BY coalesce(r.income, 0) DESC, coalesce(l.engagement_count, 0) DESC, h.entity_bk) AS INT) AS rank,
+       CASE WHEN h.entity_bk LIKE '%WHITE HOUSE%' OR h.entity_bk LIKE '%EXECUTIVE OFFICE OF THE PRESIDENT%'
+                 OR h.entity_bk LIKE '%OFFICE OF THE VICE PRESIDENT%' THEN 'White House'
+            WHEN h.entity_bk LIKE '%HOUSE OF REPRESENTATIVES%' THEN 'House'
+            WHEN h.entity_bk LIKE '%SENATE%' THEN 'Senate'
+            ELSE 'Agency' END AS chamber_or_agency
+FROM silver.hub_government_entity h
+LEFT JOIN linked l ON l.entity_hk = h.entity_hk
+LEFT JOIN reported r ON r.entity_hk = h.entity_hk;
+
+-- government_entity_quarter: contacts and income by entity and quarter.
+CREATE OR REPLACE TABLE gold.government_entity_quarter AS
+SELECT entity_hk, period_end_date,
+       CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count,
+       CAST(sum(income) AS DECIMAL(14,2)) AS income
+FROM (SELECT DISTINCT entity_hk, engagement_hk, filing_uuid, period_end_date, income FROM gold.government_entity_contact)
+GROUP BY entity_hk, period_end_date;
+
+-- government_entity_issue: the issue codes an entity is contacted on,
+-- ranked by income within the entity.
+CREATE OR REPLACE TABLE gold.government_entity_issue AS
+SELECT entity_hk, issue_code, engagement_count, income,
+       CAST(row_number() OVER (PARTITION BY entity_hk ORDER BY income DESC, engagement_count DESC, issue_code) AS INT) AS rank
+FROM (
+  SELECT entity_hk, issue_code,
+         CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count,
+         CAST(sum(income) AS DECIMAL(14,2)) AS income
+  FROM (SELECT DISTINCT entity_hk, issue_code, engagement_hk, filing_uuid, income FROM gold.government_entity_contact)
+  GROUP BY entity_hk, issue_code);
+
+-- government_entity_client: the clients behind the contacts, ranked by
+-- income within the entity.
+CREATE OR REPLACE TABLE gold.government_entity_client AS
+SELECT entity_hk, client_id, client, income,
+       CAST(row_number() OVER (PARTITION BY entity_hk ORDER BY income DESC, client, client_id) AS INT) AS rank
+FROM (
+  SELECT c.entity_hk, g.client_id, g.client, CAST(sum(c.income) AS DECIMAL(14,2)) AS income
+  FROM (SELECT DISTINCT entity_hk, engagement_hk, filing_uuid, income FROM gold.government_entity_contact) c
+  JOIN gold.engagement g ON g.engagement_hk = c.engagement_hk
+  GROUP BY c.entity_hk, g.client_id, g.client);
+
+-- ---------------------------------------------------------------------
+-- Foreign-funded lobbying. Rules, stated once:
+--   a. A quarterly report is foreign-linked when it names at least one
+--      foreign entity, or when its client's principal place of business
+--      is outside the US (ppb_country not 'US' and not null).
+--   b. The country is the foreign entity's country (its principal place
+--      of business when the country is blank); for a report with no
+--      foreign entity it is the client's ppb_country.
+--   c. A report counts once per country however many entities from that
+--      country it names, and its income counts in full (rule 1).
+-- ---------------------------------------------------------------------
+
+-- foreign_filing: one row per foreign-linked quarterly report, country
+-- and foreign entity (null entity when the link is the client's ppb).
+CREATE OR REPLACE TABLE gold.foreign_filing AS
+WITH entity_rows AS (
+  SELECT f.filing_uuid, f.engagement_hk, f.period_end_date, f.income,
+         coalesce(s.country, s.ppb_country) AS country, l.foreign_entity_hk, h.foreign_entity_bk AS foreign_entity_name
+  FROM silver.sat_foreign_entity_filing s
+  JOIN silver.link_engagement_foreign_entity l ON l.engagement_foreign_entity_hk = s.engagement_foreign_entity_hk
+  JOIN silver.hub_foreign_entity h ON h.foreign_entity_hk = l.foreign_entity_hk
+  JOIN gold.fact_filing f ON f.filing_uuid = s.filing_uuid
+  WHERE coalesce(s.country, s.ppb_country) IS NOT NULL),
+client_ppb AS (
+  SELECT client_hk, ppb_country FROM silver.sat_client_ppb
+  QUALIFY row_number() OVER (PARTITION BY client_hk ORDER BY load_date DESC, hash_diff) = 1),
+client_rows AS (
+  SELECT f.filing_uuid, f.engagement_hk, f.period_end_date, f.income,
+         p.ppb_country AS country, CAST(NULL AS STRING) AS foreign_entity_hk, CAST(NULL AS STRING) AS foreign_entity_name
+  FROM gold.fact_filing f
+  JOIN silver.link_engagement e ON e.engagement_hk = f.engagement_hk
+  JOIN client_ppb p ON p.client_hk = e.client_hk
+  WHERE p.ppb_country <> 'US'
+    AND NOT EXISTS (SELECT 1 FROM entity_rows x WHERE x.filing_uuid = f.filing_uuid))
+SELECT * FROM entity_rows
+UNION ALL
+SELECT * FROM client_rows;
+
+-- foreign_country: one row per country, ranked by income.
+CREATE OR REPLACE TABLE gold.foreign_country AS
+SELECT country,
+       CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count,
+       CAST(count(DISTINCT client_hk) AS INT) AS client_count,
+       CAST(count(DISTINCT foreign_entity_hk) AS INT) AS foreign_entity_count,
+       CAST(sum(income) AS DECIMAL(14,2)) AS income,
+       CAST(row_number() OVER (ORDER BY sum(income) DESC, count(DISTINCT engagement_hk) DESC, country) AS INT) AS rank
+FROM (
+  SELECT ff.country, ff.engagement_hk, e.client_hk, ff.foreign_entity_hk, ff.filing_uuid,
+         CASE WHEN row_number() OVER (PARTITION BY ff.country, ff.filing_uuid ORDER BY ff.foreign_entity_hk) = 1
+              THEN ff.income ELSE 0 END AS income
+  FROM gold.foreign_filing ff
+  JOIN silver.link_engagement e ON e.engagement_hk = ff.engagement_hk)
+GROUP BY country;
+
+-- foreign_country_quarter: income and engagements by country and quarter.
+CREATE OR REPLACE TABLE gold.foreign_country_quarter AS
+SELECT country, period_end_date,
+       CAST(sum(income) AS DECIMAL(14,2)) AS income,
+       CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count
+FROM (SELECT DISTINCT country, filing_uuid, engagement_hk, period_end_date, income FROM gold.foreign_filing)
+GROUP BY country, period_end_date;
+
+-- foreign_country_client: the clients behind a country's lobbying, ranked
+-- by income within the country. A client with several firms shows the
+-- firm that reported the most income for it.
+CREATE OR REPLACE TABLE gold.foreign_country_client AS
+WITH per_engagement AS (
+  SELECT ff.country, g.client_id, g.client, g.registrant_id, g.firm, sum(ff.income) AS income
+  FROM (SELECT DISTINCT country, filing_uuid, engagement_hk, income FROM gold.foreign_filing) ff
+  JOIN gold.engagement g ON g.engagement_hk = ff.engagement_hk
+  GROUP BY ff.country, g.client_id, g.client, g.registrant_id, g.firm),
+names AS (
+  SELECT ff.country, g.client_id,
+         nullif(array_join(array_sort(collect_set(ff.foreign_entity_name)), ', '), '') AS foreign_entity_names,
+         array_join(array_sort(collect_set(x.issue_code)), ', ') AS issue_codes
+  FROM gold.foreign_filing ff
+  JOIN gold.engagement g ON g.engagement_hk = ff.engagement_hk
+  LEFT JOIN gold.activity_text x ON x.filing_uuid = ff.filing_uuid
+  GROUP BY ff.country, g.client_id)
+SELECT p.country, p.client_id, max(p.client) AS client,
+       max_by(p.registrant_id, p.income) AS registrant_id, max_by(p.firm, p.income) AS firm,
+       CAST(sum(p.income) AS DECIMAL(14,2)) AS income,
+       max(n.foreign_entity_names) AS foreign_entity_names, max(n.issue_codes) AS issue_codes,
+       CAST(row_number() OVER (PARTITION BY p.country ORDER BY sum(p.income) DESC, max(p.client), p.client_id) AS INT) AS rank
+FROM per_engagement p
+LEFT JOIN names n ON n.country = p.country AND n.client_id = p.client_id
+GROUP BY p.country, p.client_id;
+
+-- ---------------------------------------------------------------------
+-- Revolving door. Everything here is the lobbyist's own disclosure: the
+-- covered position text on the filing, matched by pattern. The app shows
+-- it with the label "as disclosed by the lobbyist". Rules, stated once:
+--   a. A position is the distinct covered-position text, verbatim.
+--   b. Committees match when the lower-cased position contains a phrase
+--      from the map below. A phrase that names the committee and its
+--      chamber in words, or a committee name that exists in one chamber
+--      only, is 'high'; an abbreviation or a phrase that could be read
+--      another way is 'medium'.
+--   c. Members match the pattern (Sen|Sen.|Senator|Rep|Rep.|Representative|
+--      Congressman|Congresswoman|Cong.) followed by one to three
+--      capitalized words, the last being the surname, with an optional
+--      "(State)" or "(D-State)". The chamber comes from the title. A
+--      candidate is a distinct legislator with that surname in that
+--      chamber (and that state when given). A written first name must
+--      agree with the recorded first name or nickname, or be a prefix of
+--      three or more letters of it ("Don" for Donald): the match is kept
+--      when the first name agrees and is the only such candidate or the
+--      member is current. When no first name
+--      was written, the match is kept when the surname is unique in the
+--      chamber or exactly one current member carries it. A surname
+--      namesake never stands in for a written first name that matched
+--      nobody. 'high' when the first name or the state confirmed it,
+--      'medium' otherwise (the first-name case extends the addendum,
+--      which names only the state). Known limit: the legislators file
+--      carries a member's latest chamber only, so staff of a member who
+--      later changed chambers ("Rep. Marsha Blackburn") do not match.
+--   d. Agencies match when the position contains the name of an agency
+--      or White House office as the LDA lists it, with any trailing
+--      "(ABBR)" removed, or that abbreviation of three or more capitals
+--      as a whole word. The two chambers (House, Senate) are left out:
+--      nearly every Hill position names one and that is not an agency
+--      affiliation. 'medium'.
+--   e. lobbies_former_employer is true when the engagement contacted the
+--      chamber of the committee or member (House, Senate) or the agency
+--      itself, as classified in government_entity.
+-- ---------------------------------------------------------------------
+
+-- lobbyist_position: one row per lobbyist and distinct covered position.
+CREATE OR REPLACE TABLE gold.lobbyist_position AS
+SELECT hl.lobbyist_bk AS lobbyist_id, trim(sf.covered_position) AS position_text,
+       min(f.period_end_date) AS first_period, max(f.period_end_date) AS last_period
+FROM silver.sat_engagement_lobbyist_filing sf
+JOIN silver.link_engagement_lobbyist ll ON ll.engagement_lobbyist_hk = sf.engagement_lobbyist_hk
+JOIN silver.hub_lobbyist hl ON hl.lobbyist_hk = ll.lobbyist_hk
+LEFT JOIN gold.fact_filing f ON f.filing_uuid = sf.filing_uuid
+WHERE sf.covered_position IS NOT NULL AND trim(sf.covered_position) <> ''
+GROUP BY hl.lobbyist_bk, trim(sf.covered_position);
+
+-- lobbyist_affiliation: the committees, members and agencies a lobbyist's
+-- positions name, one row per lobbyist, kind and reference.
+CREATE OR REPLACE TABLE gold.lobbyist_affiliation AS
+WITH committee_phrase AS (
+  SELECT thomas_id, phrase, confidence FROM VALUES
+    ('HSAG', 'house agriculture', 'high'), ('HSAG', 'house committee on agriculture', 'high'), ('HSAG', 'house ag ', 'medium'),
+    ('HSAP', 'house appropriation', 'high'), ('HSAP', 'house approps', 'medium'), ('HSAP', 'h approps', 'medium'),
+    ('HSAS', 'house armed services', 'high'), ('HSAS', 'hasc', 'medium'),
+    ('HSBA', 'financial services', 'medium'), ('HSBA', 'house banking', 'medium'),
+    ('HSBU', 'house budget', 'high'),
+    ('HSED', 'education and the workforce', 'high'), ('HSED', 'education and workforce', 'high'),
+    ('HSED', 'education & the workforce', 'high'), ('HSED', 'education & workforce', 'high'), ('HSED', 'education and labor', 'high'),
+    ('HSFA', 'foreign affairs', 'high'), ('HSFA', 'for. aff.', 'medium'), ('HSFA', 'hfac', 'medium'),
+    ('HSGO', 'oversight and government reform', 'high'), ('HSGO', 'oversight and reform', 'high'),
+    ('HSGO', 'oversight and accountability', 'high'), ('HSGO', 'house oversight', 'high'), ('HSGO', 'government reform', 'medium'),
+    ('HSHA', 'house administration', 'high'), ('HSHA', 'h. admin', 'medium'),
+    ('HSHM', 'house homeland security', 'high'), ('HSHM', 'house homeland', 'medium'),
+    ('HSIF', 'energy and commerce', 'high'), ('HSIF', 'energy & commerce', 'high'), ('HSIF', 'e&c', 'medium'),
+    ('HSII', 'house natural resources', 'high'), ('HSII', 'house resources', 'medium'),
+    ('HLIG', 'house intelligence', 'high'), ('HLIG', 'house permanent select committee on intelligence', 'high'), ('HLIG', 'hpsci', 'medium'),
+    ('HSJU', 'house judiciary', 'high'),
+    ('HSPW', 'transportation and infrastructure', 'high'), ('HSPW', 'transportation & infrastructure', 'high'), ('HSPW', 't&i', 'medium'),
+    ('HSRU', 'house rules', 'high'),
+    ('HSSM', 'house small business', 'high'), ('HSSM', 'house small bus', 'medium'),
+    ('HSSO', 'house ethics', 'high'), ('HSSO', 'standards of official conduct', 'high'),
+    ('HSSY', 'science, space', 'high'), ('HSSY', 'committee on science', 'high'), ('HSSY', 'house science', 'high'),
+    ('HSSY', 'science committee', 'medium'),
+    ('HSVR', 'house veterans', 'high'), ('HSVR', 'house committee on veterans', 'high'), ('HSVR', 'house vet affairs', 'medium'),
+    ('HSWM', 'ways and means', 'high'), ('HSWM', 'ways & means', 'high'), ('HSWM', 'w&m', 'medium'), ('HSWM', 'ways means', 'medium'),
+    ('SSAF', 'senate agriculture', 'high'), ('SSAF', 'agriculture, nutrition', 'high'), ('SSAF', 'sen ag ', 'medium'), ('SSAF', 'senate ag ', 'medium'),
+    ('SSAP', 'senate appropriation', 'high'), ('SSAP', 'sen. appropriation', 'high'), ('SSAP', 'sen appropriation', 'high'),
+    ('SSAP', 'senate approps', 'medium'), ('SSAP', 'sen approps', 'medium'),
+    ('SSAS', 'senate armed services', 'high'), ('SSAS', 'sen armed services', 'high'), ('SSAS', 'sasc', 'medium'),
+    ('SSBK', 'senate banking', 'high'), ('SSBK', 'sen. banking', 'high'), ('SSBK', 'banking, housing', 'high'), ('SSBK', 'sen banking', 'medium'),
+    ('SSBU', 'senate budget', 'high'), ('SSBU', 'sen budget', 'medium'),
+    ('SSCM', 'senate commerce', 'high'), ('SSCM', 'sen. commerce', 'high'), ('SSCM', 'commerce, science', 'high'), ('SSCM', 'sen commerce', 'medium'),
+    ('SSEG', 'energy and natural resources', 'high'), ('SSEG', 'energy & natural resources', 'high'),
+    ('SSEG', 'senate energy', 'high'), ('SSEG', 'sen energy', 'medium'),
+    ('SSEV', 'environment and public works', 'high'), ('SSEV', 'environment & public works', 'high'), ('SSEV', 'epw', 'medium'),
+    ('SSFI', 'senate finance', 'high'), ('SSFI', 'sen. finance', 'high'), ('SSFI', 'sen finance', 'high'),
+    ('SSFI', 'sen. fin.', 'medium'), ('SSFI', 'sen fin', 'medium'), ('SSFI', 'senate fin.', 'medium'), ('SSFI', 'finance committee', 'medium'),
+    ('SSFR', 'foreign relations', 'high'), ('SSFR', 'sfrc', 'medium'),
+    ('SSGA', 'homeland security and governmental affairs', 'high'), ('SSGA', 'homeland security & governmental affairs', 'high'),
+    ('SSGA', 'senate governmental affairs', 'high'), ('SSGA', ' governmental affairs committee', 'medium'), ('SSGA', 'hsgac', 'medium'),
+    ('SSHR', 'health, education, labor', 'high'), ('SSHR', 'help committee', 'high'), ('SSHR', 'senate help', 'high'),
+    ('SSHR', 'sen help', 'medium'), ('SSHR', 'sen hlth', 'medium'),
+    ('SSJU', 'senate judiciary', 'high'), ('SSJU', 'sen. judiciary', 'high'), ('SSJU', 'sen judiciary', 'high'), ('SSJU', 'sen jud', 'medium'),
+    ('SSRA', 'senate rules', 'high'), ('SSRA', 'rules and administration', 'high'),
+    ('SSSB', 'senate small business', 'high'), ('SSSB', 'small business and entrepreneurship', 'high'), ('SSSB', 'sen small bus', 'medium'),
+    ('SSVA', 'senate veterans', 'high'), ('SSVA', 'senate committee on veterans', 'high'),
+    ('SSVA', 'senate vet affairs', 'medium'), ('SSVA', 'sen vet', 'medium'),
+    ('SLIA', 'committee on indian affairs', 'high'), ('SLIA', 'senate indian affairs', 'high'),
+    ('SLIN', 'senate intelligence', 'high'), ('SLIN', 'senate select committee on intelligence', 'high'), ('SLIN', 'ssci', 'medium'),
+    ('SPAG', 'special committee on aging', 'high'), ('SPAG', 'senate aging', 'high'), ('SPAG', 'aging committee', 'medium'),
+    ('SLET', 'senate ethics', 'high'), ('SLET', 'select committee on ethics', 'high'),
+    ('JSTX', 'joint committee on taxation', 'high'), ('JSTX', 'joint tax', 'medium'), ('JSTX', 'jct', 'medium'),
+    ('JSEC', 'joint economic', 'high')
+  AS t(thomas_id, phrase, confidence)),
+committee AS (
+  SELECT hc.committee_bk AS thomas_id, p.name, p.chamber
+  FROM silver.hub_committee hc
+  JOIN silver.sat_committee_profile p ON p.committee_hk = hc.committee_hk
+  QUALIFY row_number() OVER (PARTITION BY hc.committee_hk ORDER BY p.load_date DESC, p.hash_diff) = 1),
+committees AS (
+  SELECT lp.lobbyist_id, 'committee' AS kind, c.thomas_id AS ref_id, c.name AS ref_name,
+         ph.phrase AS matched_text, ph.confidence
+  FROM gold.lobbyist_position lp
+  JOIN committee_phrase ph ON lower(lp.position_text) LIKE concat('%', ph.phrase, '%')
+  JOIN committee c ON c.thomas_id = ph.thomas_id),
+mention AS (
+  SELECT lp.lobbyist_id, m AS matched_text,
+         CASE WHEN m RLIKE '^(Sen\\.?\\s|Senator)' THEN 'sen' ELSE 'rep' END AS chamber,
+         regexp_extract(m, '^(?:Sen\\.?|Senator|Rep\\.?|Representative|Congressman|Congresswoman|Cong\\.)\\s+((?:[A-Z][A-Za-z''\\-\\.]*\\s+){0,2}[A-Z][A-Za-z''\\-]+)', 1) AS name_words,
+         nullif(regexp_extract(m, '\\((?:[DRI]-)?([A-Z]{2})', 1), '') AS state
+  FROM gold.lobbyist_position lp
+  LATERAL VIEW explode(regexp_extract_all(lp.position_text,
+    '(?:Sen\\.?|Senator|Rep\\.?|Representative|Congressman|Congresswoman|Cong\\.)\\s+(?:[A-Z][A-Za-z''\\-\\.]*\\s+){0,2}[A-Z][A-Za-z''\\-]+(?:\\s*\\((?:[DRI]-)?[A-Z]{2}(?:-\\d{1,2})?\\))?', 0)) x AS m),
+parsed AS (
+  SELECT lobbyist_id, matched_text, chamber, state,
+         lower(element_at(split(trim(name_words), '\\s+'), -1)) AS last_word,
+         CASE WHEN size(split(trim(name_words), '\\s+')) > 1
+              THEN lower(regexp_replace(element_at(split(trim(name_words), '\\s+'), 1), '\\.', '')) END AS first_word
+  FROM mention WHERE name_words <> ''),
+legislator AS (
+  SELECT h.legislator_bk AS bioguide_id, coalesce(nullif(p.full_name, ''), concat_ws(' ', p.first_name, p.last_name)) AS full_name,
+         lower(p.last_name) AS last_name, lower(p.first_name) AS first_name,
+         lower(p.nickname) AS nickname, p.type, p.state, p.is_current
+  FROM silver.hub_legislator h
+  JOIN silver.sat_legislator_profile p ON p.legislator_hk = h.legislator_hk
+  QUALIFY row_number() OVER (PARTITION BY h.legislator_hk ORDER BY p.load_date DESC, p.hash_diff) = 1),
+candidate AS (
+  SELECT DISTINCT m.lobbyist_id, m.matched_text, m.first_word, l.bioguide_id, l.full_name, l.is_current,
+         coalesce(m.first_word = l.first_name OR m.first_word = l.nickname
+                  OR (length(m.first_word) >= 3 AND l.first_name LIKE concat(m.first_word, '%')), false) AS first_match,
+         m.state IS NOT NULL AS state_match
+  FROM parsed m
+  JOIN legislator l ON l.last_name = m.last_word AND l.type = m.chamber AND (m.state IS NULL OR l.state = m.state)),
+scored AS (
+  SELECT *, count(*) OVER w AS n_candidates,
+         sum(CASE WHEN first_match THEN 1 ELSE 0 END) OVER w AS n_first,
+         sum(CASE WHEN is_current THEN 1 ELSE 0 END) OVER w AS n_current
+  FROM candidate
+  WINDOW w AS (PARTITION BY lobbyist_id, matched_text)),
+members AS (
+  SELECT lobbyist_id, 'member' AS kind, bioguide_id AS ref_id, full_name AS ref_name, matched_text,
+         CASE WHEN first_match OR state_match THEN 'high' ELSE 'medium' END AS confidence
+  FROM scored
+  WHERE (first_match AND (n_first = 1 OR is_current))
+     OR (first_word IS NULL AND (n_candidates = 1 OR (is_current AND n_current = 1)))),
+agency AS (
+  SELECT entity_hk, entity_name,
+         trim(regexp_replace(entity_name, '\\s*\\([^)]*\\)', '')) AS name_plain,
+         nullif(regexp_extract(entity_name, '\\(([A-Z]{3,})\\)', 1), '') AS abbreviation
+  FROM gold.government_entity
+  WHERE chamber_or_agency NOT IN ('House', 'Senate')),
+agencies AS (
+  SELECT lp.lobbyist_id, 'agency' AS kind, g.entity_hk AS ref_id, g.entity_name AS ref_name,
+         CASE WHEN lower(lp.position_text) LIKE concat('%', lower(g.name_plain), '%') THEN g.name_plain
+              ELSE g.abbreviation END AS matched_text,
+         'medium' AS confidence
+  FROM gold.lobbyist_position lp
+  JOIN agency g ON g.name_plain <> ''
+    AND (lower(lp.position_text) LIKE concat('%', lower(g.name_plain), '%')
+         OR (g.abbreviation IS NOT NULL AND lp.position_text RLIKE concat('\\b', g.abbreviation, '\\b'))))
+SELECT lobbyist_id, kind, ref_id, max(ref_name) AS ref_name,
+       min_by(matched_text, concat(confidence, '|', matched_text)) AS matched_text, min(confidence) AS confidence
+FROM (SELECT * FROM committees UNION ALL SELECT * FROM members UNION ALL SELECT * FROM agencies)
+GROUP BY lobbyist_id, kind, ref_id;
 
 -- lobbyist_engagement: one row per lobbyist and engagement that listed
 -- them, with the quarters and the income reported while they were listed.
@@ -650,6 +1395,96 @@ JOIN silver.hub_lobbyist hl ON hl.lobbyist_hk = ll.lobbyist_hk
 JOIN gold.engagement g ON g.engagement_hk = ll.engagement_hk
 LEFT JOIN listed l ON l.lobbyist_hk = ll.lobbyist_hk AND l.engagement_hk = ll.engagement_hk
 GROUP BY hl.lobbyist_bk, ll.engagement_hk, g.client_id, g.client, g.registrant_id, g.firm;
+
+-- revolving_door: one row per lobbyist with at least one affiliation and
+-- each engagement that listed them. kind and ref_name collapse every
+-- affiliation of the lobbyist, sorted, joined with ', '.
+CREATE OR REPLACE TABLE gold.revolving_door AS
+WITH committee AS (
+  SELECT hc.committee_bk AS thomas_id, p.chamber
+  FROM silver.hub_committee hc
+  JOIN silver.sat_committee_profile p ON p.committee_hk = hc.committee_hk
+  QUALIFY row_number() OVER (PARTITION BY hc.committee_hk ORDER BY p.load_date DESC, p.hash_diff) = 1),
+legislator AS (
+  SELECT h.legislator_bk AS bioguide_id, p.type
+  FROM silver.hub_legislator h
+  JOIN silver.sat_legislator_profile p ON p.legislator_hk = h.legislator_hk
+  QUALIFY row_number() OVER (PARTITION BY h.legislator_hk ORDER BY p.load_date DESC, p.hash_diff) = 1),
+aff AS (
+  SELECT a.lobbyist_id, a.kind, a.ref_id, a.ref_name,
+         CASE WHEN a.kind = 'committee' THEN CASE c.chamber WHEN 'house' THEN 'House' WHEN 'senate' THEN 'Senate' END
+              WHEN a.kind = 'member' THEN CASE l.type WHEN 'sen' THEN 'Senate' WHEN 'rep' THEN 'House' END END AS chamber
+  FROM gold.lobbyist_affiliation a
+  LEFT JOIN committee c ON a.kind = 'committee' AND c.thomas_id = a.ref_id
+  LEFT JOIN legislator l ON a.kind = 'member' AND l.bioguide_id = a.ref_id),
+contacted AS (
+  SELECT DISTINCT l.engagement_hk, g.entity_hk, g.chamber_or_agency
+  FROM silver.link_engagement_government_entity l
+  JOIN gold.government_entity g ON g.entity_hk = l.entity_hk),
+pair AS (
+  SELECT le.lobbyist_id, le.engagement_hk,
+         array_join(array_sort(collect_set(a.kind)), ', ') AS kind,
+         array_join(array_sort(collect_set(a.ref_name)), ', ') AS ref_name,
+         max(c.entity_hk IS NOT NULL) AS lobbies_former_employer
+  FROM gold.lobbyist_engagement le
+  JOIN aff a ON a.lobbyist_id = le.lobbyist_id
+  LEFT JOIN contacted c ON c.engagement_hk = le.engagement_hk
+    AND ((a.kind = 'agency' AND c.entity_hk = a.ref_id) OR (a.chamber IS NOT NULL AND c.chamber_or_agency = a.chamber))
+  GROUP BY le.lobbyist_id, le.engagement_hk),
+profile AS (
+  SELECT hl.lobbyist_bk AS lobbyist_id, initcap(concat_ws(' ', p.first_name, p.last_name)) AS full_name
+  FROM silver.hub_lobbyist hl
+  JOIN silver.sat_lobbyist_profile p ON p.lobbyist_hk = hl.lobbyist_hk
+  QUALIFY row_number() OVER (PARTITION BY hl.lobbyist_hk ORDER BY p.load_date DESC, p.hash_diff) = 1)
+SELECT p.lobbyist_id, p.engagement_hk, pr.full_name, p.kind, p.ref_name,
+       le.client_id, le.client, le.registrant_id, le.firm, g.issue_codes,
+       le.income_while_listed AS income, p.lobbies_former_employer
+FROM pair p
+JOIN gold.lobbyist_engagement le ON le.lobbyist_id = p.lobbyist_id AND le.engagement_hk = p.engagement_hk
+JOIN gold.engagement g ON g.engagement_hk = p.engagement_hk
+LEFT JOIN profile pr ON pr.lobbyist_id = p.lobbyist_id;
+
+-- lobbyist: one row per individual lobbyist. covered_positions is the
+-- disclosed former government roles, verbatim from the filings, distinct
+-- and joined with ' | '. Quarters count the quarterly reports that list
+-- the person, so someone named only on a registration has 0.
+-- affiliation_count and lobbies_former_employer come from the revolving
+-- door marts above.
+CREATE OR REPLACE TABLE gold.lobbyist AS
+WITH profile AS (
+  SELECT lobbyist_hk, first_name, last_name FROM silver.sat_lobbyist_profile
+  QUALIFY row_number() OVER (PARTITION BY lobbyist_hk ORDER BY load_date DESC, hash_diff) = 1),
+listed AS (
+  SELECT ll.lobbyist_hk, e.client_hk, e.registrant_hk, f.period_end_date, sf.covered_position
+  FROM silver.link_engagement_lobbyist ll
+  JOIN silver.link_engagement e ON e.engagement_hk = ll.engagement_hk
+  JOIN silver.sat_engagement_lobbyist_filing sf ON sf.engagement_lobbyist_hk = ll.engagement_lobbyist_hk
+  LEFT JOIN gold.fact_filing f ON f.filing_uuid = sf.filing_uuid),
+agg AS (
+  SELECT lobbyist_hk,
+         count(DISTINCT client_hk) AS client_count, count(DISTINCT registrant_hk) AS firm_count,
+         count(DISTINCT period_end_date) AS quarters_active,
+         min(period_end_date) AS first_period, max(period_end_date) AS last_period,
+         nullif(array_join(array_sort(collect_set(nullif(trim(covered_position), ''))), ' | '), '') AS covered_positions
+  FROM listed GROUP BY lobbyist_hk),
+affiliations AS (
+  SELECT lobbyist_id, count(*) AS affiliation_count FROM gold.lobbyist_affiliation GROUP BY lobbyist_id),
+former AS (
+  SELECT lobbyist_id, max(lobbies_former_employer) AS lobbies_former_employer FROM gold.revolving_door GROUP BY lobbyist_id)
+SELECT hl.lobbyist_bk AS lobbyist_id,
+       initcap(concat_ws(' ', p.first_name, p.last_name)) AS full_name,
+       a.covered_positions,
+       CAST(coalesce(a.client_count, 0) AS INT) AS client_count,
+       CAST(coalesce(a.firm_count, 0) AS INT) AS firm_count,
+       CAST(coalesce(a.quarters_active, 0) AS INT) AS quarters_active,
+       a.first_period, a.last_period,
+       CAST(coalesce(af.affiliation_count, 0) AS INT) AS affiliation_count,
+       coalesce(fm.lobbies_former_employer, false) AS lobbies_former_employer
+FROM silver.hub_lobbyist hl
+LEFT JOIN profile p ON p.lobbyist_hk = hl.lobbyist_hk
+LEFT JOIN agg a ON a.lobbyist_hk = hl.lobbyist_hk
+LEFT JOIN affiliations af ON af.lobbyist_id = hl.lobbyist_bk
+LEFT JOIN former fm ON fm.lobbyist_id = hl.lobbyist_bk;
 
 -- search_entity: every client and firm name in one list for the home
 -- page search box.
