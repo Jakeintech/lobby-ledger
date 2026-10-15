@@ -5,127 +5,603 @@ import type { SQLTypeMarker, SQLStringMarker, SQLNumberMarker, SQLBooleanMarker,
 
 declare module "@databricks/appkit-ui/react" {
   interface QueryRegistry {
-    engagement_asof: {
-        name: "engagement_asof";
-        parameters: {
-          /** STRING - use sql.string() */
-          engagement_hk: SQLStringMarker;
-          /** DATE - use sql.date() */
-          as_of_date: SQLDateMarker;
-        };
+    about_freshness: {
+        name: "about_freshness";
+        parameters: Record<string, never>;
         result: Array<{
           /** @sqlType DATE */
-          snapshot_date: string;
-          /** @sqlType DATE */
-          as_of_period_end: string;
-          /** @sqlType STRING */
-          filing_type: string;
-          /** @sqlType DOUBLE */
-          income_that_quarter: number;
-          /** @sqlType STRING */
-          status_as_of: string;
-          /** @sqlType STRING */
-          team_as_of: string;
+          latest_period: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          filing_count: number;
         }>;
       };
-    engagement_bills: {
-        name: "engagement_bills";
+    bill_detail: {
+        name: "bill_detail";
         parameters: {
           /** STRING - use sql.string() */
-          engagement_hk: SQLStringMarker;
+          key: SQLStringMarker;
         };
         result: Array<{
-          /** @sqlType STRING */
-          bill_label: string;
           /** @sqlType STRING */
           bill_key: string;
           /** @sqlType STRING */
-          issue_codes: string;
+          bill_label: string;
+          /** @sqlType INT */
+          engagement_count: number;
           /** @sqlType INT */
           filings_mentioning: number;
           /** @sqlType DATE */
           first_period: string;
           /** @sqlType DATE */
           last_period: string;
+          /** @sqlType STRING */
+          issue_codes: string;
         }>;
       };
-    engagement_team: {
-        name: "engagement_team";
+    bill_engagements: {
+        name: "bill_engagements";
         parameters: {
           /** STRING - use sql.string() */
-          engagement_hk: SQLStringMarker;
-        };
-        result: Array<{
-          /** @sqlType STRING */
-          lobbyist: string;
-          /** @sqlType BIGINT */
-          quarters_listed: number;
-          /** @sqlType DATE */
-          first_period: string;
-          /** @sqlType DATE */
-          last_period: string;
-          /** @sqlType DOUBLE */
-          income_while_listed: number;
-          /** @sqlType STRING */
-          queried_as: string;
-        }>;
-      };
-    engagement_team_sp: {
-        name: "engagement_team_sp";
-        parameters: {
-          /** STRING - use sql.string() */
-          engagement_hk: SQLStringMarker;
-        };
-        result: Array<{
-          /** @sqlType STRING */
-          lobbyist: string;
-          /** @sqlType BIGINT */
-          quarters_listed: number;
-          /** @sqlType DATE */
-          first_period: string;
-          /** @sqlType DATE */
-          last_period: string;
-          /** @sqlType DOUBLE */
-          income_while_listed: number;
-          /** @sqlType STRING */
-          queried_as: string;
-        }>;
-      };
-    experience_search: {
-        name: "experience_search";
-        parameters: {
-          /** STRING - use sql.string() */
-          issue_code: SQLStringMarker;
-          /** STRING - use sql.string() */
-          keyword: SQLStringMarker;
-          /** INT - use sql.int() */
-          year: SQLNumberMarker;
+          key: SQLStringMarker;
         };
         result: Array<{
           /** @sqlType STRING */
           engagement_hk: string;
           /** @sqlType STRING */
-          firm: string;
+          client_id: string;
           /** @sqlType STRING */
           client: string;
           /** @sqlType STRING */
           client_description: string;
           /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
           issue_codes: string;
-          /** @sqlType BIGINT */
-          lobbyist_count: number;
+          /** @sqlType STRING */
+          bill_labels: string;
+          /** @sqlType STRING */
+          government_entities: string;
           /** @sqlType DOUBLE */
           total_income: number;
           /** @sqlType DATE */
           first_period: string;
           /** @sqlType DATE */
           last_period: string;
-          /** @sqlType BIGINT */
+          /** @sqlType INT */
           quarters_active: number;
           /** @sqlType STRING */
           engagement_status: string;
           /** @sqlType STRING */
           ai_summary: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType DATE */
+          bill_first_period: string;
+          /** @sqlType DATE */
+          bill_last_period: string;
+        }>;
+      };
+    bill_quarters: {
+        name: "bill_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          key: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          bill_key: string;
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType INT */
+          filings_mentioning: number;
+          /** @sqlType INT */
+          engagement_count: number;
+        }>;
+      };
+    client_detail: {
+        name: "client_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          name: string;
+          /** @sqlType STRING */
+          description: string;
+          /** @sqlType STRING */
+          state: string;
+          /** @sqlType INT */
+          firm_count: number;
+          /** @sqlType STRING */
+          firms: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType INT */
+          quarters_active: number;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType INT */
+          lobbyist_count: number;
+          /** @sqlType INT */
+          engagement_count: number;
+        }>;
+      };
+    client_engagements: {
+        name: "client_engagements";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          engagement_hk: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          client_description: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType STRING */
+          bill_labels: string;
+          /** @sqlType STRING */
+          government_entities: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType INT */
+          quarters_active: number;
+          /** @sqlType STRING */
+          engagement_status: string;
+          /** @sqlType STRING */
+          ai_summary: string;
+        }>;
+      };
+    client_lobbyists: {
+        name: "client_lobbyists";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          full_name: string;
+          /** @sqlType STRING */
+          covered_positions: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType INT */
+          quarters_listed: number;
+        }>;
+      };
+    client_quarters: {
+        name: "client_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          engagement_count: number;
+        }>;
+      };
+    engagement_detail: {
+        name: "engagement_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          hk: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          engagement_hk: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          client_description: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType STRING */
+          bill_labels: string;
+          /** @sqlType STRING */
+          government_entities: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType INT */
+          quarters_active: number;
+          /** @sqlType STRING */
+          engagement_status: string;
+          /** @sqlType STRING */
+          ai_summary: string;
+        }>;
+      };
+    firm_clients: {
+        name: "firm_clients";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          engagement_hk: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          client_description: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType STRING */
+          bill_labels: string;
+          /** @sqlType STRING */
+          government_entities: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType INT */
+          quarters_active: number;
+          /** @sqlType STRING */
+          engagement_status: string;
+          /** @sqlType STRING */
+          ai_summary: string;
+        }>;
+      };
+    firm_detail: {
+        name: "firm_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          name: string;
+          /** @sqlType STRING */
+          description: string;
+          /** @sqlType STRING */
+          city: string;
+          /** @sqlType STRING */
+          state: string;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType INT */
+          lobbyist_count: number;
+          /** @sqlType INT */
+          engagement_count: number;
+        }>;
+      };
+    firm_lobbyists: {
+        name: "firm_lobbyists";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          full_name: string;
+          /** @sqlType STRING */
+          covered_positions: string;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType INT */
+          quarters_listed: number;
+        }>;
+      };
+    firm_quarters: {
+        name: "firm_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          client_count: number;
+        }>;
+      };
+    home_quarters: {
+        name: "home_quarters";
+        parameters: Record<string, never>;
+        result: Array<{
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          engagement_count: number;
+        }>;
+      };
+    home_topics: {
+        name: "home_topics";
+        parameters: Record<string, never>;
+        result: Array<{
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType STRING */
+          issue_name: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          firm_count: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    lobbyist_detail: {
+        name: "lobbyist_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          full_name: string;
+          /** @sqlType STRING */
+          covered_positions: string;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          firm_count: number;
+          /** @sqlType INT */
+          quarters_active: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+        }>;
+      };
+    lobbyist_engagements: {
+        name: "lobbyist_engagements";
+        parameters: {
+          /** STRING - use sql.string() */
+          id: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          lobbyist_id: string;
+          /** @sqlType STRING */
+          engagement_hk: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType INT */
+          quarters_listed: number;
+          /** @sqlType DOUBLE */
+          income_while_listed: number;
+        }>;
+      };
+    search_entities: {
+        name: "search_entities";
+        parameters: {
+          /** STRING - use sql.string() */
+          q: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          kind: string;
+          /** @sqlType STRING */
+          id: string;
+          /** @sqlType STRING */
+          name: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+        }>;
+      };
+    topic_bills: {
+        name: "topic_bills";
+        parameters: {
+          /** STRING - use sql.string() */
+          code: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType STRING */
+          bill_key: string;
+          /** @sqlType STRING */
+          bill_label: string;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          filings_mentioning: number;
+        }>;
+      };
+    topic_clients: {
+        name: "topic_clients";
+        parameters: {
+          /** STRING - use sql.string() */
+          code: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    topic_detail: {
+        name: "topic_detail";
+        parameters: {
+          /** STRING - use sql.string() */
+          code: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType STRING */
+          issue_name: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          firm_count: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    topic_engagements: {
+        name: "topic_engagements";
+        parameters: {
+          /** STRING - use sql.string() */
+          code: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          engagement_hk: string;
+          /** @sqlType STRING */
+          client_id: string;
+          /** @sqlType STRING */
+          client: string;
+          /** @sqlType STRING */
+          client_description: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType STRING */
+          issue_codes: string;
+          /** @sqlType STRING */
+          bill_labels: string;
+          /** @sqlType STRING */
+          government_entities: string;
+          /** @sqlType DOUBLE */
+          total_income: number;
+          /** @sqlType DATE */
+          first_period: string;
+          /** @sqlType DATE */
+          last_period: string;
+          /** @sqlType INT */
+          quarters_active: number;
+          /** @sqlType STRING */
+          engagement_status: string;
+          /** @sqlType STRING */
+          ai_summary: string;
+        }>;
+      };
+    topic_firms: {
+        name: "topic_firms";
+        parameters: {
+          /** STRING - use sql.string() */
+          code: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType STRING */
+          registrant_id: string;
+          /** @sqlType STRING */
+          firm: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          rank: number;
+        }>;
+      };
+    topic_quarters: {
+        name: "topic_quarters";
+        parameters: {
+          /** STRING - use sql.string() */
+          code: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          issue_code: string;
+          /** @sqlType DATE */
+          period_end_date: string;
+          /** @sqlType DOUBLE */
+          income: number;
+          /** @sqlType INT */
+          engagement_count: number;
+          /** @sqlType INT */
+          client_count: number;
+          /** @sqlType INT */
+          firm_count: number;
         }>;
       };
   }
