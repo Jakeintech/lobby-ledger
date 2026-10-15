@@ -1,5 +1,5 @@
 bundle:
-  name: lobbying-experience-search
+  name: lobby-ledger
 
 variables:
   sql_warehouse_id:
@@ -8,8 +8,8 @@ variables:
 resources:
   apps:
     app:
-      name: "lobbying-experience-search"
-      description: "Search lobbying engagements by issue, client and team"
+      name: "lobby-ledger"
+      description: "Who lobbies Congress, for whom, on what, and for how much"
       source_code_path: ./
 
       # Start the app automatically on deploy.

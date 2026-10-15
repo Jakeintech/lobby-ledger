@@ -1,5 +1,5 @@
 {
-  "name": "lobbying-experience-search",
+  "name": "lobby-ledger",
   "version": "1.0.0",
   "main": "dist/server.js",
   "type": "module",
