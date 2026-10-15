@@ -1,0 +1,4 @@
+command: ['pnpm', 'run', 'start']
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
