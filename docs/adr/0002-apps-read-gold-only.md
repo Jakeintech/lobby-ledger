@@ -8,7 +8,7 @@ The Raw Vault is optimized for loading and audit, not for reading. A screen that
 
 ## Decision
 
-The AppKit app queries only `gold.*` objects: `experience_search`, `fact_filing`, `bridge_registrant_client_lobbyist`, `pit_engagement` and the dimensions. Business rules live in Gold SQL (`sat_engagement_computed`, `fact_filing`). Silver is granted to the pipeline, not to apps.
+The AppKit app queries only `gold.*` objects, one mart per page: `topic`, `topic_quarter`, `bill`, `client`, `firm`, `lobbyist`, `engagement`, `engagement_quarter` and their companions. Business rules (which amendment wins, what counts as income, what lapsed means, how a filing's income is attributed to its issue codes) live in Gold SQL. Silver is granted to the pipeline, not to apps.
 
 ## Consequences
 
