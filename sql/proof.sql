@@ -18,6 +18,8 @@ FROM silver.sat_engagement_filing;
 SELECT 'hub_registrant' AS object, count(*) AS row_count FROM silver.hub_registrant
 UNION ALL SELECT 'hub_client', count(*) FROM silver.hub_client
 UNION ALL SELECT 'hub_lobbyist', count(*) FROM silver.hub_lobbyist
+UNION ALL SELECT 'hub_organization', count(*) FROM silver.hub_organization
+UNION ALL SELECT 'link_client_organization', count(*) FROM silver.link_client_organization
 UNION ALL SELECT 'hub_issue', count(*) FROM silver.hub_issue
 UNION ALL SELECT 'hub_government_entity', count(*) FROM silver.hub_government_entity
 UNION ALL SELECT 'link_engagement', count(*) FROM silver.link_engagement
@@ -87,7 +89,15 @@ UNION ALL SELECT 'foreign_country_quarter', count(*) FROM gold.foreign_country_q
 UNION ALL SELECT 'foreign_country_client', count(*) FROM gold.foreign_country_client
 UNION ALL SELECT 'lobbyist_position', count(*) FROM gold.lobbyist_position
 UNION ALL SELECT 'lobbyist_affiliation', count(*) FROM gold.lobbyist_affiliation
-UNION ALL SELECT 'revolving_door', count(*) FROM gold.revolving_door;
+UNION ALL SELECT 'revolving_door', count(*) FROM gold.revolving_door
+UNION ALL SELECT 'organization', count(*) FROM gold.organization
+UNION ALL SELECT 'organization_quarter', count(*) FROM gold.organization_quarter
+UNION ALL SELECT 'organization_firm', count(*) FROM gold.organization_firm
+UNION ALL SELECT 'issue_committee', count(*) FROM gold.issue_committee
+UNION ALL SELECT 'surge', count(*) FROM gold.surge
+UNION ALL SELECT 'filing_timing', count(*) FROM gold.filing_timing
+UNION ALL SELECT 'peer_rank', count(*) FROM gold.peer_rank
+UNION ALL SELECT 'edge', count(*) FROM gold.edge;
 
 -- 5. The income attribution rule in one line: the sum over topics is larger
 --    than the sum over engagements because a filing counts toward every
@@ -124,6 +134,54 @@ GROUP BY ref_name ORDER BY lobbyists DESC, ref_name LIMIT 10;
 --     with zeros, so every tile on /trends renders.
 SELECT count(*) AS curated_terms, sum(CASE WHEN filings_mentioning = 0 THEN 1 ELSE 0 END) AS terms_without_mentions
 FROM gold.term;
+
+-- 12. Organizations across firms: how many organizations stand behind more
+--     than one client record, and the five registered with the most firms.
+SELECT count(*) AS organizations,
+       sum(CASE WHEN client_count > 1 THEN 1 ELSE 0 END) AS organizations_with_several_client_rows,
+       sum(CASE WHEN firm_count > 1 THEN 1 ELSE 0 END) AS organizations_with_several_firms
+FROM gold.organization;
+
+SELECT organization_name, client_count, firm_count, total_income
+FROM gold.organization ORDER BY firm_count DESC, total_income DESC, organization_name LIMIT 5;
+
+-- 13. Committee jurisdiction: codes mapped per chamber, and how many
+--     revolving-door rows have a committee with jurisdiction over the
+--     engagement's issues.
+SELECT chamber, count(DISTINCT issue_code) AS issue_codes, count(DISTINCT thomas_id) AS committees
+FROM gold.issue_committee GROUP BY chamber ORDER BY chamber;
+
+SELECT jurisdiction_match, lobbies_former_employer, count(*) AS rows
+FROM gold.revolving_door GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- 14. Surges by kind, and the newest quarter's surges.
+SELECT kind, count(*) AS scored_quarters, sum(CASE WHEN is_surge THEN 1 ELSE 0 END) AS surges
+FROM gold.surge GROUP BY kind ORDER BY kind;
+
+SELECT kind, name, period_end_date, income, mean_prior, z
+FROM gold.surge WHERE is_surge AND period_end_date = (SELECT max(period_end_date) FROM gold.surge)
+ORDER BY z DESC, kind, id LIMIT 5;
+
+-- 15. Filing timing: the share of reports posted after the observed due
+--     date, by period, so the weekend and holiday shift of the deadline
+--     is visible, then the posting weekdays.
+SELECT period_end_date, due_date, due_date_observed, count(*) AS reports,
+       sum(CASE WHEN days_late > 0 THEN 1 ELSE 0 END) AS late,
+       round(100 * avg(CASE WHEN days_late > 0 THEN 1.0 ELSE 0 END), 1) AS pct_late,
+       percentile_approx(days_late, 0.5) AS median_days_late,
+       sum(CASE WHEN posted_date = due_date_observed THEN 1 ELSE 0 END) AS posted_on_due_day
+FROM gold.filing_timing GROUP BY 1, 2, 3 ORDER BY 1;
+
+SELECT count(*) AS reports, sum(CASE WHEN days_late > 0 THEN 1 ELSE 0 END) AS late,
+       round(100 * avg(CASE WHEN days_late > 0 THEN 1.0 ELSE 0 END), 1) AS pct_late,
+       percentile_approx(days_late, 0.5) AS median_days_late
+FROM gold.filing_timing;
+
+SELECT posted_weekday, count(*) AS reports FROM gold.filing_timing GROUP BY posted_weekday ORDER BY reports DESC;
+
+-- 16. Network edges by kind.
+SELECT src_kind, dst_kind, count(*) AS edges, sum(weight) AS total_weight
+FROM gold.edge GROUP BY src_kind, dst_kind ORDER BY src_kind;
 
 -- Manual step, not run here: a denied read of Silver as lobby-public.
 --   databricks -p <lobby-public profile> api post /api/2.0/sql/statements \

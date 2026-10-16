@@ -15,6 +15,20 @@ FROM (
 -- Silver: hubs, links and satellites keep their grain
 SELECT 'hub_registrant unique key' AS test, count(*) - count(DISTINCT registrant_hk) AS failures FROM silver.hub_registrant
 UNION ALL SELECT 'hub_client unique key', count(*) - count(DISTINCT client_hk) FROM silver.hub_client
+UNION ALL SELECT 'hub_organization unique key', count(*) - count(DISTINCT organization_hk) FROM silver.hub_organization
+UNION ALL SELECT 'hub_organization not_null key', count(*) FROM silver.hub_organization WHERE organization_hk IS NULL OR organization_bk IS NULL OR organization_bk = ''
+UNION ALL SELECT 'link_client_organization unique key', count(*) - count(DISTINCT client_organization_hk) FROM silver.link_client_organization
+UNION ALL SELECT 'link_client_organization -> hub_client', count(*) FROM silver.link_client_organization l
+  WHERE NOT EXISTS (SELECT 1 FROM silver.hub_client h WHERE h.client_hk = l.client_hk)
+UNION ALL SELECT 'link_client_organization -> hub_organization', count(*) FROM silver.link_client_organization l
+  WHERE NOT EXISTS (SELECT 1 FROM silver.hub_organization h WHERE h.organization_hk = l.organization_hk)
+UNION ALL SELECT 'every client maps to exactly one organization', count(*) FROM (
+  SELECT hc.client_hk, count(DISTINCT l.organization_hk) AS organizations
+  FROM silver.hub_client hc
+  LEFT JOIN (SELECT client_hk, organization_hk FROM silver.link_client_organization
+             QUALIFY row_number() OVER (PARTITION BY client_hk ORDER BY load_date DESC, organization_hk) = 1) l
+    ON l.client_hk = hc.client_hk
+  GROUP BY hc.client_hk) x WHERE organizations <> 1
 UNION ALL SELECT 'hub_lobbyist unique key', count(*) - count(DISTINCT lobbyist_hk) FROM silver.hub_lobbyist
 UNION ALL SELECT 'hub_issue unique key', count(*) - count(DISTINCT issue_hk) FROM silver.hub_issue
 UNION ALL SELECT 'hub_government_entity unique key', count(*) - count(DISTINCT entity_hk) FROM silver.hub_government_entity
@@ -162,6 +176,25 @@ UNION ALL SELECT 'lobbyist_engagement not_null key', count(*) FROM gold.lobbyist
 UNION ALL SELECT 'search_entity unique key', count(*) - count(DISTINCT kind, id) FROM gold.search_entity
 UNION ALL SELECT 'search_entity not_null key', count(*) FROM gold.search_entity WHERE kind IS NULL OR id IS NULL
 UNION ALL SELECT 'issue_name unique key', count(*) - count(DISTINCT issue_code) FROM gold.issue_name
+UNION ALL SELECT 'organization unique key', count(*) - count(DISTINCT organization_hk) FROM gold.organization
+UNION ALL SELECT 'organization not_null key', count(*) FROM gold.organization WHERE organization_hk IS NULL OR organization_name IS NULL
+UNION ALL SELECT 'organization_quarter unique key', count(*) - count(DISTINCT organization_hk, period_end_date) FROM gold.organization_quarter
+UNION ALL SELECT 'organization_quarter not_null key', count(*) FROM gold.organization_quarter WHERE organization_hk IS NULL OR period_end_date IS NULL
+UNION ALL SELECT 'organization_firm unique key', count(*) - count(DISTINCT organization_hk, registrant_id) FROM gold.organization_firm
+UNION ALL SELECT 'organization_firm not_null key', count(*) FROM gold.organization_firm WHERE organization_hk IS NULL OR registrant_id IS NULL OR client_id IS NULL
+UNION ALL SELECT 'issue_committee unique key', count(*) - count(DISTINCT issue_code, chamber, thomas_id) FROM gold.issue_committee
+UNION ALL SELECT 'issue_committee not_null key', count(*) FROM gold.issue_committee WHERE issue_code IS NULL OR chamber IS NULL OR thomas_id IS NULL OR committee_name IS NULL
+UNION ALL SELECT 'surge unique key', count(*) - count(DISTINCT kind, id, period_end_date) FROM gold.surge
+UNION ALL SELECT 'surge not_null key', count(*) FROM gold.surge WHERE kind IS NULL OR id IS NULL OR period_end_date IS NULL OR name IS NULL
+UNION ALL SELECT 'filing_timing unique key', count(*) - count(DISTINCT filing_uuid) FROM gold.filing_timing
+UNION ALL SELECT 'filing_timing one row per engagement and period', count(*) - count(DISTINCT engagement_hk, period_end_date) FROM gold.filing_timing
+UNION ALL SELECT 'filing_timing not_null key', count(*) FROM gold.filing_timing
+  WHERE filing_uuid IS NULL OR engagement_hk IS NULL OR registrant_id IS NULL OR client_id IS NULL OR period_end_date IS NULL
+     OR due_date IS NULL OR due_date_observed IS NULL
+UNION ALL SELECT 'peer_rank unique key', count(*) - count(DISTINCT kind, id, issue_code) FROM gold.peer_rank
+UNION ALL SELECT 'peer_rank not_null key', count(*) FROM gold.peer_rank WHERE kind IS NULL OR id IS NULL OR issue_code IS NULL OR pct_rank IS NULL
+UNION ALL SELECT 'edge unique key', count(*) - count(DISTINCT src_kind, src_id, dst_kind, dst_id) FROM gold.edge
+UNION ALL SELECT 'edge not_null key', count(*) FROM gold.edge WHERE src_kind IS NULL OR src_id IS NULL OR dst_kind IS NULL OR dst_id IS NULL OR weight IS NULL
 
 -- Gold: coverage and relationships
 UNION ALL SELECT 'engagement covers every link_engagement', count(*) FROM silver.link_engagement e
@@ -252,6 +285,112 @@ UNION ALL SELECT 'engagement client and firm -> client and firm', count(*) FROM 
      OR NOT EXISTS (SELECT 1 FROM gold.firm f WHERE f.registrant_id = g.registrant_id)
 UNION ALL SELECT 'topic -> issue_name', count(*) FROM gold.topic t
   WHERE NOT EXISTS (SELECT 1 FROM gold.issue_name n WHERE n.issue_code = t.issue_code)
+UNION ALL SELECT 'client organization not_null', count(*) FROM gold.client WHERE organization_hk IS NULL OR organization_name IS NULL
+UNION ALL SELECT 'client -> organization', count(*) FROM gold.client c
+  WHERE NOT EXISTS (SELECT 1 FROM gold.organization o WHERE o.organization_hk = c.organization_hk)
+UNION ALL SELECT 'client organization_name matches organization', count(*) FROM gold.client c
+  JOIN gold.organization o ON o.organization_hk = c.organization_hk WHERE o.organization_name <> c.organization_name
+UNION ALL SELECT 'organization covers every hub_organization with a client', count(*) FROM silver.hub_organization h
+  WHERE EXISTS (SELECT 1 FROM gold.client c WHERE c.organization_hk = h.organization_hk)
+    AND NOT EXISTS (SELECT 1 FROM gold.organization o WHERE o.organization_hk = h.organization_hk)
+UNION ALL SELECT 'organization client_count equals its client rows', count(*) FROM gold.organization o
+  JOIN (SELECT organization_hk, count(*) AS n FROM gold.client GROUP BY organization_hk) c ON c.organization_hk = o.organization_hk
+  WHERE c.n <> o.client_count
+UNION ALL SELECT 'organization total_income equals the sum of its clients', count(*) FROM gold.organization o
+  JOIN (SELECT organization_hk, sum(total_income) AS income FROM gold.client GROUP BY organization_hk) c ON c.organization_hk = o.organization_hk
+  WHERE c.income <> o.total_income
+UNION ALL SELECT 'organization total_income equals the sum of its quarters', count(*) FROM gold.organization o
+  LEFT JOIN (SELECT organization_hk, sum(income) AS income FROM gold.organization_quarter GROUP BY organization_hk) q ON q.organization_hk = o.organization_hk
+  WHERE coalesce(q.income, 0) <> o.total_income
+UNION ALL SELECT 'organization firm_count equals its organization_firm rows', count(*) FROM gold.organization o
+  LEFT JOIN (SELECT organization_hk, count(*) AS n FROM gold.organization_firm GROUP BY organization_hk) f ON f.organization_hk = o.organization_hk
+  WHERE coalesce(f.n, 0) <> o.firm_count
+UNION ALL SELECT 'organization_quarter -> organization', count(*) FROM gold.organization_quarter q
+  WHERE NOT EXISTS (SELECT 1 FROM gold.organization o WHERE o.organization_hk = q.organization_hk)
+UNION ALL SELECT 'organization_firm -> organization', count(*) FROM gold.organization_firm f
+  WHERE NOT EXISTS (SELECT 1 FROM gold.organization o WHERE o.organization_hk = f.organization_hk)
+UNION ALL SELECT 'organization_firm -> firm and client', count(*) FROM gold.organization_firm f
+  WHERE NOT EXISTS (SELECT 1 FROM gold.firm x WHERE x.registrant_id = f.registrant_id)
+     OR NOT EXISTS (SELECT 1 FROM gold.client c WHERE c.client_id = f.client_id AND c.organization_hk = f.organization_hk)
+UNION ALL SELECT 'search_entity client carries its organization', count(*) FROM gold.search_entity
+  WHERE (kind = 'client' AND (organization_hk IS NULL OR organization_name IS NULL))
+     OR (kind = 'firm' AND organization_hk IS NOT NULL)
+UNION ALL SELECT 'issue_committee -> issue_name', count(*) FROM gold.issue_committee i
+  WHERE NOT EXISTS (SELECT 1 FROM gold.issue_name n WHERE n.issue_code = i.issue_code)
+UNION ALL SELECT 'issue_committee -> hub_committee', count(*) FROM gold.issue_committee i
+  WHERE NOT EXISTS (SELECT 1 FROM silver.hub_committee h WHERE h.committee_bk = i.thomas_id)
+UNION ALL SELECT 'issue_committee chamber agrees with the committee reference', count(*) FROM gold.issue_committee i
+  JOIN silver.hub_committee h ON h.committee_bk = i.thomas_id
+  JOIN silver.sat_committee_profile p ON p.committee_hk = h.committee_hk
+  WHERE p.chamber <> i.chamber
+UNION ALL SELECT 'issue_committee names standing committees only (no subcommittee)', count(*) FROM gold.issue_committee i
+  JOIN silver.hub_committee h ON h.committee_bk = i.thomas_id
+  JOIN silver.sat_committee_profile p ON p.committee_hk = h.committee_hk
+  WHERE p.parent_id IS NOT NULL
+UNION ALL SELECT 'every issue code maps to at least one committee per chamber', count(*) FROM gold.issue_name n
+  WHERE NOT EXISTS (SELECT 1 FROM gold.issue_committee i WHERE i.issue_code = n.issue_code AND i.chamber = 'house')
+     OR NOT EXISTS (SELECT 1 FROM gold.issue_committee i WHERE i.issue_code = n.issue_code AND i.chamber = 'senate')
+UNION ALL SELECT 'lobbyist_affiliation committee carries its jurisdiction issues', count(*) FROM gold.lobbyist_affiliation a
+  WHERE (a.kind = 'committee' AND a.jurisdiction_issues IS NULL
+         AND EXISTS (SELECT 1 FROM gold.issue_committee i WHERE i.thomas_id = a.ref_id))
+     OR (a.kind <> 'committee' AND a.jurisdiction_issues IS NOT NULL)
+UNION ALL SELECT 'revolving_door jurisdiction_match not_null', count(*) FROM gold.revolving_door WHERE jurisdiction_match IS NULL
+UNION ALL SELECT 'revolving_door jurisdiction_match only with a committee affiliation', count(*) FROM gold.revolving_door r
+  WHERE r.jurisdiction_match AND NOT EXISTS (SELECT 1 FROM gold.lobbyist_affiliation a WHERE a.lobbyist_id = r.lobbyist_id AND a.kind = 'committee')
+UNION ALL SELECT 'surge -> client, firm or topic', count(*) FROM gold.surge s
+  WHERE NOT ((s.kind = 'client' AND EXISTS (SELECT 1 FROM gold.client c WHERE c.client_id = s.id))
+          OR (s.kind = 'firm' AND EXISTS (SELECT 1 FROM gold.firm f WHERE f.registrant_id = s.id))
+          OR (s.kind = 'issue' AND EXISTS (SELECT 1 FROM gold.topic t WHERE t.issue_code = s.id)))
+UNION ALL SELECT 'surge income equals the quarter it scores', count(*) FROM gold.surge s
+  LEFT JOIN gold.client_quarter cq ON s.kind = 'client' AND cq.client_id = s.id AND cq.period_end_date = s.period_end_date
+  LEFT JOIN gold.firm_quarter fq ON s.kind = 'firm' AND fq.registrant_id = s.id AND fq.period_end_date = s.period_end_date
+  LEFT JOIN gold.topic_quarter tq ON s.kind = 'issue' AND tq.issue_code = s.id AND tq.period_end_date = s.period_end_date
+  WHERE coalesce(cq.income, fq.income, tq.income) IS NULL OR coalesce(cq.income, fq.income, tq.income) <> s.income
+UNION ALL SELECT 'surge has at least three prior quarters', count(*) FROM (
+  SELECT s.kind, s.id, s.period_end_date, count(q.period_end_date) AS prior_quarters
+  FROM gold.surge s
+  LEFT JOIN (SELECT 'client' AS kind, client_id AS id, period_end_date FROM gold.client_quarter
+             UNION ALL SELECT 'firm', registrant_id, period_end_date FROM gold.firm_quarter
+             UNION ALL SELECT 'issue', issue_code, period_end_date FROM gold.topic_quarter) q
+    ON q.kind = s.kind AND q.id = s.id AND q.period_end_date < s.period_end_date
+  GROUP BY s.kind, s.id, s.period_end_date) x WHERE prior_quarters < 3
+UNION ALL SELECT 'filing_timing -> fact_filing by engagement and period', count(*) FROM gold.filing_timing t
+  WHERE NOT EXISTS (SELECT 1 FROM gold.fact_filing f WHERE f.engagement_hk = t.engagement_hk AND f.period_end_date = t.period_end_date)
+UNION ALL SELECT 'filing_timing covers every fact_filing row', count(*) FROM gold.fact_filing f
+  WHERE NOT EXISTS (SELECT 1 FROM gold.filing_timing t WHERE t.engagement_hk = f.engagement_hk AND t.period_end_date = f.period_end_date)
+UNION ALL SELECT 'filing_timing filing_uuid is a quarterly report of that engagement', count(*) FROM gold.filing_timing t
+  WHERE NOT EXISTS (SELECT 1 FROM silver.sat_engagement_filing s
+                    WHERE s.filing_uuid = t.filing_uuid AND s.engagement_hk = t.engagement_hk AND s.filing_type NOT IN ('RR', 'RA'))
+UNION ALL SELECT 'filing_timing filing_uuid is the first-posted version of its period', count(*) FROM gold.filing_timing t
+  JOIN silver.sat_engagement_filing s0 ON s0.filing_uuid = t.filing_uuid
+  JOIN silver.sat_engagement_filing s ON s.engagement_hk = t.engagement_hk
+    AND s.filing_year = s0.filing_year AND s.filing_period = s0.filing_period
+    AND s.filing_type NOT IN ('RR', 'RA') AND s.dt_posted < s0.dt_posted
+UNION ALL SELECT 'filing_timing posted_date is the Eastern-time day of dt_posted', count(*) FROM gold.filing_timing t
+  JOIN silver.sat_engagement_filing s ON s.filing_uuid = t.filing_uuid
+  WHERE t.posted_date <> CAST(convert_timezone('America/New_York', s.dt_posted) AS DATE)
+     OR t.posted_weekday <> date_format(convert_timezone('America/New_York', s.dt_posted), 'EEEE')
+     OR t.posted_hour_utc <> hour(convert_timezone('UTC', s.dt_posted))
+UNION ALL SELECT 'surge mean_prior is the mean of the prior quarters', count(*) FROM (
+  SELECT s.kind, s.id, s.period_end_date, s.mean_prior, avg(q.income) AS recomputed
+  FROM gold.surge s
+  JOIN (SELECT 'client' AS kind, client_id AS id, period_end_date, income FROM gold.client_quarter
+        UNION ALL SELECT 'firm', registrant_id, period_end_date, income FROM gold.firm_quarter
+        UNION ALL SELECT 'issue', issue_code, period_end_date, income FROM gold.topic_quarter) q
+    ON q.kind = s.kind AND q.id = s.id AND q.period_end_date < s.period_end_date
+  GROUP BY s.kind, s.id, s.period_end_date, s.mean_prior) x WHERE abs(recomputed - mean_prior) > 0.01
+UNION ALL SELECT 'peer_rank -> topic_firm or topic_client', count(*) FROM gold.peer_rank p
+  WHERE NOT ((p.kind = 'firm' AND EXISTS (SELECT 1 FROM gold.topic_firm t WHERE t.registrant_id = p.id AND t.issue_code = p.issue_code AND t.income = p.income))
+          OR (p.kind = 'client' AND EXISTS (SELECT 1 FROM gold.topic_client t WHERE t.client_id = p.id AND t.issue_code = p.issue_code AND t.income = p.income)))
+UNION ALL SELECT 'edge client-firm covers every engagement', count(*) FROM gold.engagement g
+  WHERE NOT EXISTS (SELECT 1 FROM gold.edge e WHERE e.src_kind = 'client' AND e.src_id = g.client_id AND e.dst_kind = 'firm' AND e.dst_id = g.registrant_id)
+UNION ALL SELECT 'edge engagement-bill -> bill_engagement', count(*) FROM gold.edge e
+  WHERE e.src_kind = 'engagement'
+    AND NOT EXISTS (SELECT 1 FROM gold.bill_engagement b
+                    WHERE b.engagement_hk = e.src_id AND concat(CAST(b.congress AS STRING), '-', b.bill_key) = e.dst_id)
+UNION ALL SELECT 'edge lobbyist-engagement -> lobbyist_engagement', count(*) FROM gold.edge e
+  WHERE e.src_kind = 'lobbyist'
+    AND NOT EXISTS (SELECT 1 FROM gold.lobbyist_engagement le WHERE le.lobbyist_id = e.src_id AND le.engagement_hk = e.dst_id)
 
 -- Gold: accepted values and formats
 UNION ALL SELECT 'engagement_status accepted values', count(*) FROM gold.engagement
@@ -288,6 +427,40 @@ UNION ALL SELECT 'topic rank is 1..n', count(*) - count(DISTINCT rank)
   + sum(CASE WHEN rank < 1 THEN 1 ELSE 0 END) + greatest(max(rank) - count(*), 0) FROM gold.topic
 UNION ALL SELECT 'engagement not_null names', count(*) FROM gold.engagement
   WHERE client IS NULL OR firm IS NULL OR client_id IS NULL OR registrant_id IS NULL
+UNION ALL SELECT 'issue_committee chamber accepted values', count(*) FROM gold.issue_committee WHERE chamber NOT IN ('house', 'senate')
+UNION ALL SELECT 'surge kind accepted values', count(*) FROM gold.surge WHERE kind NOT IN ('client', 'firm', 'issue')
+UNION ALL SELECT 'surge is_surge agrees with z', count(*) FROM gold.surge
+  WHERE is_surge IS NULL OR is_surge <> coalesce(z >= 2, false)
+UNION ALL SELECT 'surge z null only when the prior deviation is zero', count(*) FROM gold.surge
+  WHERE (z IS NULL AND stddev_prior <> 0) OR (z IS NOT NULL AND stddev_prior = 0) OR mean_prior IS NULL OR stddev_prior IS NULL
+UNION ALL SELECT 'filing_timing due_date is period_end_date plus 20 days', count(*) FROM gold.filing_timing
+  WHERE due_date <> date_add(period_end_date, 20)
+UNION ALL SELECT 'filing_timing due_date_observed is the next business day on or after due_date', count(*) FROM gold.filing_timing
+  WHERE due_date_observed IS NULL OR due_date_observed < due_date OR due_date_observed > date_add(due_date, 3)
+     OR dayofweek(due_date_observed) IN (1, 7)
+     OR (month(due_date_observed) = 1 AND dayofweek(due_date_observed) = 2 AND day(due_date_observed) BETWEEN 15 AND 21)
+     OR (dayofweek(due_date) NOT IN (1, 7) AND due_date_observed <> due_date
+         AND NOT (month(due_date) = 1 AND dayofweek(due_date) = 2 AND day(due_date) BETWEEN 15 AND 21))
+UNION ALL SELECT 'filing_timing days_late null only when posted_date null', count(*) FROM gold.filing_timing
+  WHERE (days_late IS NULL) <> (posted_date IS NULL)
+     OR (posted_date IS NOT NULL AND (days_late <> datediff(posted_date, due_date_observed) OR posted_weekday IS NULL OR posted_hour_utc IS NULL))
+UNION ALL SELECT 'filing_timing posted_weekday accepted values', count(*) FROM gold.filing_timing
+  WHERE posted_weekday NOT IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
+UNION ALL SELECT 'filing_timing posted_hour_utc is 0..23', count(*) FROM gold.filing_timing WHERE posted_hour_utc < 0 OR posted_hour_utc > 23
+UNION ALL SELECT 'peer_rank kind accepted values', count(*) FROM gold.peer_rank WHERE kind NOT IN ('firm', 'client')
+UNION ALL SELECT 'peer_rank pct_rank is 0..1', count(*) FROM gold.peer_rank WHERE pct_rank < 0 OR pct_rank > 1
+UNION ALL SELECT 'peer_rank highest income in an issue code has pct_rank 1 (unless tied)', count(*) FROM (
+  SELECT kind, issue_code, count(*) AS peers, max_by(pct_rank, income) AS top_rank,
+         sum(CASE WHEN income = top_income THEN 1 ELSE 0 END) AS rows_at_top
+  FROM (SELECT kind, issue_code, income, pct_rank, max(income) OVER (PARTITION BY kind, issue_code) AS top_income FROM gold.peer_rank)
+  GROUP BY kind, issue_code) x
+  WHERE peers > 1 AND rows_at_top = 1 AND top_rank <> 1
+UNION ALL SELECT 'peer_rank lowest income in an issue code has pct_rank 0', count(*) FROM (
+  SELECT kind, issue_code, min_by(pct_rank, income) AS bottom_rank FROM gold.peer_rank GROUP BY kind, issue_code) x
+  WHERE bottom_rank <> 0
+UNION ALL SELECT 'edge kinds accepted values', count(*) FROM gold.edge
+  WHERE (src_kind, dst_kind) NOT IN (('client', 'firm'), ('engagement', 'bill'), ('lobbyist', 'engagement'))
+UNION ALL SELECT 'edge weight is not negative', count(*) FROM gold.edge WHERE weight < 0
 
 -- Gold: income rules. Null income on a report means 0 (rule 5), so no
 -- mart may carry a null income or total.
@@ -308,6 +481,11 @@ UNION ALL SELECT 'no null income in foreign_country_quarter', count(*) FROM gold
 UNION ALL SELECT 'no null income in bill_quarter', count(*) FROM gold.bill_quarter WHERE income IS NULL
 UNION ALL SELECT 'no null income in bill_congress', count(*) FROM gold.bill_congress WHERE income IS NULL
 UNION ALL SELECT 'no null income in revolving_door', count(*) FROM gold.revolving_door WHERE income IS NULL
+UNION ALL SELECT 'no null income in organization_quarter', count(*) FROM gold.organization_quarter WHERE income IS NULL
+UNION ALL SELECT 'no null total_income in organization', count(*) FROM gold.organization WHERE total_income IS NULL
+UNION ALL SELECT 'no null total_income in organization_firm', count(*) FROM gold.organization_firm WHERE total_income IS NULL
+UNION ALL SELECT 'no null income in surge', count(*) FROM gold.surge WHERE income IS NULL
+UNION ALL SELECT 'no null income in peer_rank', count(*) FROM gold.peer_rank WHERE income IS NULL
 UNION ALL SELECT 'engagement total_income equals the sum of its quarters', count(*) FROM gold.engagement g
   WHERE g.total_income <> (SELECT coalesce(sum(q.income), 0) FROM gold.engagement_quarter q WHERE q.engagement_hk = g.engagement_hk)
 

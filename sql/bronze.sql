@@ -69,6 +69,14 @@ SELECT *, false AS is_current, current_timestamp() AS load_date, 'unitedstates/c
 FROM read_files('/Volumes/workspace/bronze/landing/legislators-historical.csv', format => 'csv', header => true,
                 inferSchema => false, multiLine => true);
 
+-- Curated by hand in this repo: which standing committee of each chamber
+-- has jurisdiction over each LDA general issue code (data/reference/
+-- issue_committees.csv, one row per issue code, chamber and thomas id).
+CREATE OR REPLACE TABLE bronze.ref_issue_committees AS
+SELECT *, current_timestamp() AS load_date, 'lobby-ledger/data/reference' AS record_source
+FROM read_files('/Volumes/workspace/bronze/landing/issue_committees.csv', format => 'csv', header => true,
+                inferSchema => false);
+
 -- Bills from the Congress.gov API (ingest/pull_bills.py), which runs after
 -- Gold exists because it reads gold.bill_congress for the keys to fetch.
 CREATE OR REPLACE TABLE bronze.congress_bills AS
@@ -91,5 +99,6 @@ UNION ALL SELECT 'foreign_entities', count(*) FROM bronze.lda_foreign_entities
 UNION ALL SELECT 'affiliated_organizations', count(*) FROM bronze.lda_affiliated_organizations
 UNION ALL SELECT 'ref_committees', count(*) FROM bronze.ref_committees
 UNION ALL SELECT 'ref_legislators', count(*) FROM bronze.ref_legislators
+UNION ALL SELECT 'ref_issue_committees', count(*) FROM bronze.ref_issue_committees
 UNION ALL SELECT 'congress_bills', count(*) FROM bronze.congress_bills
 UNION ALL SELECT 'congress_bill_actions', count(*) FROM bronze.congress_bill_actions;

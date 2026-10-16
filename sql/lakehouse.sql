@@ -41,6 +41,40 @@ FROM bronze.lda_clients s
 WHERE NOT EXISTS (SELECT 1 FROM silver.hub_client h
                   WHERE h.client_hk = md5(upper(trim(CAST(s.client_id AS STRING)))));
 
+-- hub_organization: one row per organization behind the client records.
+-- In LDA data a client id belongs to one registrant, so one organization
+-- hired by three firms is three client rows. The business key is the
+-- client name upper-cased with everything but letters, digits and single
+-- spaces removed, then any run of trailing corporate suffixes (INC,
+-- INCORPORATED, LLC, CORP, CORPORATION, CO, COMPANY, LTD, LIMITED, LP,
+-- PLC, LLP) dropped, so "ACME, INC.", "Acme Inc", "ACME CO INC" and
+-- "ACME" resolve to the same organization. Hard rules only: upper,
+-- regexp strip, trim, md5. The spec's item 0 writes the shorter form;
+-- this expression is the one in force, applied identically below in
+-- link_client_organization.
+CREATE TABLE IF NOT EXISTS silver.hub_organization (
+  organization_hk STRING, organization_bk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.hub_organization
+SELECT DISTINCT md5(organization_bk), organization_bk, current_timestamp(), 'lda.senate.gov'
+FROM (SELECT regexp_replace(trim(regexp_replace(regexp_replace(upper(trim(name)), '[^A-Z0-9 ]', ''), ' +', ' ')), '( (INC|INCORPORATED|LLC|CORP|CORPORATION|CO|COMPANY|LTD|LIMITED|LP|PLC|LLP))+$', '') AS organization_bk
+      FROM bronze.lda_clients WHERE name IS NOT NULL) s
+WHERE organization_bk <> ''
+  AND NOT EXISTS (SELECT 1 FROM silver.hub_organization h WHERE h.organization_hk = md5(s.organization_bk));
+
+-- link_client_organization: which organization a client record belongs to.
+CREATE TABLE IF NOT EXISTS silver.link_client_organization (
+  client_organization_hk STRING, client_hk STRING, organization_hk STRING, load_date TIMESTAMP, record_source STRING);
+
+INSERT INTO silver.link_client_organization
+SELECT DISTINCT md5(concat_ws('||', client_hk, organization_hk)), client_hk, organization_hk, current_timestamp(), 'lda.senate.gov'
+FROM (SELECT md5(upper(trim(CAST(client_id AS STRING)))) AS client_hk,
+             md5(regexp_replace(trim(regexp_replace(regexp_replace(upper(trim(name)), '[^A-Z0-9 ]', ''), ' +', ' ')), '( (INC|INCORPORATED|LLC|CORP|CORPORATION|CO|COMPANY|LTD|LIMITED|LP|PLC|LLP))+$', '')) AS organization_hk
+      FROM bronze.lda_clients
+      WHERE name IS NOT NULL AND regexp_replace(trim(regexp_replace(regexp_replace(upper(trim(name)), '[^A-Z0-9 ]', ''), ' +', ' ')), '( (INC|INCORPORATED|LLC|CORP|CORPORATION|CO|COMPANY|LTD|LIMITED|LP|PLC|LLP))+$', '') <> '') s
+WHERE NOT EXISTS (SELECT 1 FROM silver.link_client_organization l
+                  WHERE l.client_organization_hk = md5(concat_ws('||', s.client_hk, s.organization_hk)));
+
 -- hub_lobbyist: one row per individual lobbyist named on a filing.
 CREATE TABLE IF NOT EXISTS silver.hub_lobbyist (
   lobbyist_hk STRING, lobbyist_bk STRING, load_date TIMESTAMP, record_source STRING);
@@ -847,10 +881,16 @@ JOIN gold.engagement g ON g.engagement_hk = m.engagement_hk
 GROUP BY m.congress, m.bill_key, m.engagement_hk, g.client_id, g.client, g.registrant_id, g.firm;
 
 -- client: one row per client with the firms it hired and its totals.
+-- organization_hk and organization_name attach the organization behind
+-- the client record (link_client_organization); the organization's
+-- display name is the name of its highest-income client record.
 CREATE OR REPLACE TABLE gold.client AS
 WITH profile AS (
   SELECT client_hk, name, general_description, state FROM silver.sat_client_profile
   QUALIFY row_number() OVER (PARTITION BY client_hk ORDER BY load_date DESC, hash_diff) = 1),
+org_link AS (
+  SELECT client_hk, organization_hk FROM silver.link_client_organization
+  QUALIFY row_number() OVER (PARTITION BY client_hk ORDER BY load_date DESC, organization_hk) = 1),
 eng AS (
   SELECT e.client_hk, count(*) AS engagement_count, count(DISTINCT e.registrant_hk) AS firm_count,
          array_join(array_sort(collect_set(g.firm)), ', ') AS firms, sum(g.total_income) AS total_income
@@ -872,20 +912,29 @@ people AS (
   SELECT e.client_hk, count(DISTINCT ll.lobbyist_hk) AS lobbyist_count
   FROM silver.link_engagement_lobbyist ll
   JOIN silver.link_engagement e ON e.engagement_hk = ll.engagement_hk
-  GROUP BY e.client_hk)
+  GROUP BY e.client_hk),
+org_name AS (
+  SELECT o.organization_hk, max_by(p.name, struct(coalesce(eng.total_income, 0), p.name)) AS organization_name
+  FROM org_link o
+  JOIN profile p ON p.client_hk = o.client_hk
+  LEFT JOIN eng ON eng.client_hk = o.client_hk
+  GROUP BY o.organization_hk)
 SELECT hc.client_bk AS client_id, p.name, p.general_description AS description, p.state,
        CAST(coalesce(eng.firm_count, 0) AS INT) AS firm_count, eng.firms,
        CAST(coalesce(eng.total_income, 0) AS DECIMAL(14,2)) AS total_income,
        CAST(coalesce(quarters.quarters_active, 0) AS INT) AS quarters_active,
        issues.issue_codes,
        CAST(coalesce(people.lobbyist_count, 0) AS INT) AS lobbyist_count,
-       CAST(coalesce(eng.engagement_count, 0) AS INT) AS engagement_count
+       CAST(coalesce(eng.engagement_count, 0) AS INT) AS engagement_count,
+       o.organization_hk, n.organization_name
 FROM silver.hub_client hc
 LEFT JOIN profile p ON p.client_hk = hc.client_hk
 LEFT JOIN eng ON eng.client_hk = hc.client_hk
 LEFT JOIN quarters ON quarters.client_hk = hc.client_hk
 LEFT JOIN issues ON issues.client_hk = hc.client_hk
-LEFT JOIN people ON people.client_hk = hc.client_hk;
+LEFT JOIN people ON people.client_hk = hc.client_hk
+LEFT JOIN org_link o ON o.client_hk = hc.client_hk
+LEFT JOIN org_name n ON n.organization_hk = o.organization_hk;
 
 -- client_quarter: income reported on a client's filings by quarter.
 CREATE OR REPLACE TABLE gold.client_quarter AS
@@ -896,6 +945,84 @@ FROM gold.engagement_quarter q
 JOIN silver.link_engagement e ON e.engagement_hk = q.engagement_hk
 JOIN silver.hub_client hc ON hc.client_hk = e.client_hk
 GROUP BY hc.client_bk, q.period_end_date;
+
+-- ---------------------------------------------------------------------
+-- Organizations across firms. Rule, stated once: an organization is the
+-- set of client records that share a normalized name (hub_organization),
+-- so one organization hired by three firms is one organization with three
+-- client rows. Its totals are the sums over those client records; a
+-- quarterly report counts once (rule 1 does not apply, each report
+-- belongs to one client record).
+-- ---------------------------------------------------------------------
+
+-- organization_quarter: income by organization and quarter.
+CREATE OR REPLACE TABLE gold.organization_quarter AS
+SELECT c.organization_hk, q.period_end_date,
+       CAST(sum(q.income) AS DECIMAL(14,2)) AS income,
+       CAST(count(DISTINCT q.engagement_hk) AS INT) AS engagement_count,
+       CAST(count(DISTINCT e.client_hk) AS INT) AS client_count,
+       CAST(count(DISTINCT e.registrant_hk) AS INT) AS firm_count
+FROM gold.engagement_quarter q
+JOIN silver.link_engagement e ON e.engagement_hk = q.engagement_hk
+JOIN silver.hub_client hc ON hc.client_hk = e.client_hk
+JOIN gold.client c ON c.client_id = hc.client_bk
+WHERE c.organization_hk IS NOT NULL
+GROUP BY c.organization_hk, q.period_end_date;
+
+-- organization: one row per organization with its client records, firms
+-- and totals.
+CREATE OR REPLACE TABLE gold.organization AS
+WITH member AS (
+  SELECT c.organization_hk, c.organization_name, c.client_id, hc.client_hk, c.total_income, c.issue_codes
+  FROM gold.client c
+  JOIN silver.hub_client hc ON hc.client_bk = c.client_id
+  WHERE c.organization_hk IS NOT NULL),
+eng AS (
+  SELECT m.organization_hk, count(*) AS engagement_count, count(DISTINCT e.registrant_hk) AS firm_count,
+         min(g.first_period) AS first_period, max(g.last_period) AS last_period
+  FROM member m
+  JOIN silver.link_engagement e ON e.client_hk = m.client_hk
+  JOIN gold.engagement g ON g.engagement_hk = e.engagement_hk
+  GROUP BY m.organization_hk),
+quarters AS (
+  SELECT organization_hk, count(*) AS quarters_active FROM gold.organization_quarter GROUP BY organization_hk),
+issues AS (
+  SELECT m.organization_hk, array_join(array_sort(collect_set(x.issue_code)), ', ') AS issue_codes
+  FROM member m
+  LATERAL VIEW explode(split(m.issue_codes, ', ')) x AS issue_code
+  WHERE m.issue_codes IS NOT NULL
+  GROUP BY m.organization_hk)
+SELECT m.organization_hk, max(m.organization_name) AS organization_name,
+       CAST(count(*) AS INT) AS client_count,
+       CAST(coalesce(max(eng.firm_count), 0) AS INT) AS firm_count,
+       CAST(coalesce(max(eng.engagement_count), 0) AS INT) AS engagement_count,
+       CAST(sum(m.total_income) AS DECIMAL(14,2)) AS total_income,
+       CAST(coalesce(max(quarters.quarters_active), 0) AS INT) AS quarters_active,
+       max(issues.issue_codes) AS issue_codes,
+       max(eng.first_period) AS first_period, max(eng.last_period) AS last_period
+FROM member m
+LEFT JOIN eng ON eng.organization_hk = m.organization_hk
+LEFT JOIN quarters ON quarters.organization_hk = m.organization_hk
+LEFT JOIN issues ON issues.organization_hk = m.organization_hk
+GROUP BY m.organization_hk;
+
+-- organization_firm: one row per organization and firm it registered
+-- with. client_id and client are the client record that firm reported
+-- the most income for; rank is 1 for the firm with the most income.
+CREATE OR REPLACE TABLE gold.organization_firm AS
+SELECT organization_hk, registrant_id, firm, client_id, client, engagement_count, total_income, first_period, last_period,
+       CAST(row_number() OVER (PARTITION BY organization_hk ORDER BY total_income DESC, firm, registrant_id) AS INT) AS rank
+FROM (
+  SELECT c.organization_hk, g.registrant_id, g.firm,
+         max_by(g.client_id, struct(g.total_income, g.client_id)) AS client_id,
+         max_by(g.client, struct(g.total_income, g.client_id)) AS client,
+         CAST(count(*) AS INT) AS engagement_count,
+         CAST(sum(g.total_income) AS DECIMAL(14,2)) AS total_income,
+         min(g.first_period) AS first_period, max(g.last_period) AS last_period
+  FROM gold.engagement g
+  JOIN gold.client c ON c.client_id = g.client_id
+  WHERE c.organization_hk IS NOT NULL
+  GROUP BY c.organization_hk, g.registrant_id, g.firm);
 
 -- firm: one row per registrant (lobbying firm) with its totals.
 CREATE OR REPLACE TABLE gold.firm AS
@@ -1237,6 +1364,28 @@ GROUP BY p.country, p.client_id;
 --      itself, as classified in government_entity.
 -- ---------------------------------------------------------------------
 
+-- issue_committee: which standing committee of each chamber has
+-- jurisdiction over each LDA general issue code, curated by hand in
+-- data/reference/issue_committees.csv. Rule, stated once: the map is the
+-- curated list and nothing else; every issue code has at least one House
+-- and one Senate standing committee. Select and permanent committees
+-- (intelligence, Indian affairs, ethics, aging, the joint committees)
+-- are left out on purpose, so a lobbyist whose only disclosed committee
+-- is one of those has null jurisdiction_issues and never sets
+-- revolving_door.jurisdiction_match. committee_name comes from the
+-- unitedstates committee reference.
+CREATE OR REPLACE TABLE gold.issue_committee AS
+WITH committee AS (
+  SELECT hc.committee_bk AS thomas_id, p.name
+  FROM silver.hub_committee hc
+  JOIN silver.sat_committee_profile p ON p.committee_hk = hc.committee_hk
+  QUALIFY row_number() OVER (PARTITION BY hc.committee_hk ORDER BY p.load_date DESC, p.hash_diff) = 1)
+SELECT DISTINCT upper(trim(r.issue_code)) AS issue_code, lower(trim(r.chamber)) AS chamber,
+       upper(trim(r.thomas_id)) AS thomas_id, c.name AS committee_name
+FROM bronze.ref_issue_committees r
+LEFT JOIN committee c ON c.thomas_id = upper(trim(r.thomas_id))
+WHERE r.issue_code IS NOT NULL AND r.thomas_id IS NOT NULL;
+
 -- lobbyist_position: one row per lobbyist and distinct covered position.
 CREATE OR REPLACE TABLE gold.lobbyist_position AS
 SELECT hl.lobbyist_bk AS lobbyist_id, trim(sf.covered_position) AS position_text,
@@ -1250,6 +1399,9 @@ GROUP BY hl.lobbyist_bk, trim(sf.covered_position);
 
 -- lobbyist_affiliation: the committees, members and agencies a lobbyist's
 -- positions name, one row per lobbyist, kind and reference.
+-- jurisdiction_issues lists the issue codes a committee affiliation has
+-- jurisdiction over (issue_committee), sorted and joined with ', ';
+-- null for a member or agency.
 CREATE OR REPLACE TABLE gold.lobbyist_affiliation AS
 WITH committee_phrase AS (
   SELECT thomas_id, phrase, confidence FROM VALUES
@@ -1371,11 +1523,18 @@ agencies AS (
   FROM gold.lobbyist_position lp
   JOIN agency g ON g.name_plain <> ''
     AND (lower(lp.position_text) LIKE concat('%', lower(g.name_plain), '%')
-         OR (g.abbreviation IS NOT NULL AND lp.position_text RLIKE concat('\\b', g.abbreviation, '\\b'))))
-SELECT lobbyist_id, kind, ref_id, max(ref_name) AS ref_name,
-       min_by(matched_text, concat(confidence, '|', matched_text)) AS matched_text, min(confidence) AS confidence
-FROM (SELECT * FROM committees UNION ALL SELECT * FROM members UNION ALL SELECT * FROM agencies)
-GROUP BY lobbyist_id, kind, ref_id;
+         OR (g.abbreviation IS NOT NULL AND lp.position_text RLIKE concat('\\b', g.abbreviation, '\\b')))),
+collapsed AS (
+  SELECT lobbyist_id, kind, ref_id, max(ref_name) AS ref_name,
+         min_by(matched_text, concat(confidence, '|', matched_text)) AS matched_text, min(confidence) AS confidence
+  FROM (SELECT * FROM committees UNION ALL SELECT * FROM members UNION ALL SELECT * FROM agencies)
+  GROUP BY lobbyist_id, kind, ref_id),
+jurisdiction AS (
+  SELECT thomas_id, array_join(array_sort(collect_set(issue_code)), ', ') AS jurisdiction_issues
+  FROM gold.issue_committee GROUP BY thomas_id)
+SELECT x.lobbyist_id, x.kind, x.ref_id, x.ref_name, x.matched_text, x.confidence, j.jurisdiction_issues
+FROM collapsed x
+LEFT JOIN jurisdiction j ON x.kind = 'committee' AND j.thomas_id = x.ref_id;
 
 -- lobbyist_engagement: one row per lobbyist and engagement that listed
 -- them, with the quarters and the income reported while they were listed.
@@ -1399,6 +1558,9 @@ GROUP BY hl.lobbyist_bk, ll.engagement_hk, g.client_id, g.client, g.registrant_i
 -- revolving_door: one row per lobbyist with at least one affiliation and
 -- each engagement that listed them. kind and ref_name collapse every
 -- affiliation of the lobbyist, sorted, joined with ', '.
+-- jurisdiction_match is true when a committee the lobbyist disclosed
+-- has jurisdiction (issue_committee) over an issue code the engagement
+-- has listed on any filing (link_engagement_issue).
 CREATE OR REPLACE TABLE gold.revolving_door AS
 WITH committee AS (
   SELECT hc.committee_bk AS thomas_id, p.chamber
@@ -1431,6 +1593,16 @@ pair AS (
   LEFT JOIN contacted c ON c.engagement_hk = le.engagement_hk
     AND ((a.kind = 'agency' AND c.entity_hk = a.ref_id) OR (a.chamber IS NOT NULL AND c.chamber_or_agency = a.chamber))
   GROUP BY le.lobbyist_id, le.engagement_hk),
+engagement_issue AS (
+  SELECT DISTINCT li.engagement_hk, hi.issue_bk AS issue_code
+  FROM silver.link_engagement_issue li
+  JOIN silver.hub_issue hi ON hi.issue_hk = li.issue_hk),
+jurisdiction AS (
+  SELECT DISTINCT le.lobbyist_id, le.engagement_hk
+  FROM gold.lobbyist_engagement le
+  JOIN gold.lobbyist_affiliation a ON a.lobbyist_id = le.lobbyist_id AND a.kind = 'committee'
+  JOIN gold.issue_committee ic ON ic.thomas_id = a.ref_id
+  JOIN engagement_issue ei ON ei.engagement_hk = le.engagement_hk AND ei.issue_code = ic.issue_code),
 profile AS (
   SELECT hl.lobbyist_bk AS lobbyist_id, initcap(concat_ws(' ', p.first_name, p.last_name)) AS full_name
   FROM silver.hub_lobbyist hl
@@ -1438,11 +1610,13 @@ profile AS (
   QUALIFY row_number() OVER (PARTITION BY hl.lobbyist_hk ORDER BY p.load_date DESC, p.hash_diff) = 1)
 SELECT p.lobbyist_id, p.engagement_hk, pr.full_name, p.kind, p.ref_name,
        le.client_id, le.client, le.registrant_id, le.firm, g.issue_codes,
-       le.income_while_listed AS income, p.lobbies_former_employer
+       le.income_while_listed AS income, p.lobbies_former_employer,
+       j.lobbyist_id IS NOT NULL AS jurisdiction_match
 FROM pair p
 JOIN gold.lobbyist_engagement le ON le.lobbyist_id = p.lobbyist_id AND le.engagement_hk = p.engagement_hk
 JOIN gold.engagement g ON g.engagement_hk = p.engagement_hk
-LEFT JOIN profile pr ON pr.lobbyist_id = p.lobbyist_id;
+LEFT JOIN profile pr ON pr.lobbyist_id = p.lobbyist_id
+LEFT JOIN jurisdiction j ON j.lobbyist_id = p.lobbyist_id AND j.engagement_hk = p.engagement_hk;
 
 -- lobbyist: one row per individual lobbyist. covered_positions is the
 -- disclosed former government roles, verbatim from the filings, distinct
@@ -1487,8 +1661,127 @@ LEFT JOIN affiliations af ON af.lobbyist_id = hl.lobbyist_bk
 LEFT JOIN former fm ON fm.lobbyist_id = hl.lobbyist_bk;
 
 -- search_entity: every client and firm name in one list for the home
--- page search box.
+-- page search box. organization_hk and organization_name let the search
+-- collapse the client records of one organization; null for a firm.
 CREATE OR REPLACE TABLE gold.search_entity AS
-SELECT 'client' AS kind, client_id AS id, name, total_income FROM gold.client
+SELECT 'client' AS kind, client_id AS id, name, total_income, organization_hk, organization_name FROM gold.client
 UNION ALL
-SELECT 'firm' AS kind, registrant_id AS id, name, total_income FROM gold.firm;
+SELECT 'firm' AS kind, registrant_id AS id, name, total_income, CAST(NULL AS STRING) AS organization_hk,
+       CAST(NULL AS STRING) AS organization_name FROM gold.firm;
+
+-- ---------------------------------------------------------------------
+-- Surge signal. Rule, stated once: a quarter's income is compared with
+-- the entity's prior reported quarters (at least three; quarters with no
+-- report are not filled in). z is (income - mean of the prior quarters)
+-- / sample standard deviation of the prior quarters, null when that
+-- deviation is zero. is_surge is z >= 2. kind is client, firm or issue;
+-- the issue series carries rule 1 (a report counts toward every issue
+-- code it lists).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE TABLE gold.surge AS
+WITH series AS (
+  SELECT 'client' AS kind, client_id AS id, period_end_date, income FROM gold.client_quarter
+  UNION ALL SELECT 'firm', registrant_id, period_end_date, income FROM gold.firm_quarter
+  UNION ALL SELECT 'issue', issue_code, period_end_date, income FROM gold.topic_quarter),
+prior AS (
+  SELECT kind, id, period_end_date, income,
+         count(*) OVER w AS prior_quarters,
+         avg(income) OVER w AS mean_prior,
+         stddev_samp(income) OVER w AS stddev_prior
+  FROM series
+  WINDOW w AS (PARTITION BY kind, id ORDER BY period_end_date ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)),
+scored AS (
+  SELECT kind, id, period_end_date, income,
+         CAST(mean_prior AS DECIMAL(14,2)) AS mean_prior,
+         CAST(stddev_prior AS DECIMAL(14,2)) AS stddev_prior,
+         CASE WHEN stddev_prior > 0 THEN round((income - mean_prior) / stddev_prior, 2) END AS z
+  FROM prior
+  WHERE prior_quarters >= 3)
+SELECT s.kind, s.id, coalesce(c.name, f.name, n.issue_name, s.id) AS name, s.period_end_date, s.income,
+       s.mean_prior, s.stddev_prior, CAST(s.z AS DOUBLE) AS z, coalesce(s.z >= 2, false) AS is_surge
+FROM scored s
+LEFT JOIN gold.client c ON s.kind = 'client' AND c.client_id = s.id
+LEFT JOIN gold.firm f ON s.kind = 'firm' AND f.registrant_id = s.id
+LEFT JOIN gold.issue_name n ON s.kind = 'issue' AND n.issue_code = s.id;
+
+-- ---------------------------------------------------------------------
+-- Filing timing. Rule, stated once: a quarterly report is due 20 days
+-- after the period ends (LDA section 5), counted in calendar days; that
+-- is due_date. When the 20th day falls on a Saturday or Sunday the
+-- deadline moves to the Monday, and when it lands on Martin Luther King
+-- Jr. Day (the third Monday of January, the only federal holiday that
+-- can fall on a quarterly due date) it moves to the Tuesday; that is
+-- due_date_observed. The report that meets the deadline is the first
+-- version posted for the engagement and period, so the row carries the
+-- first-posted version's filing_uuid and posting time, not the amendment
+-- that wins elsewhere (rule 3). Days are counted in Eastern time, the
+-- LDA filing clock: posted_date and posted_weekday come from the posting
+-- time rendered in America/New_York, and days_late is posted_date minus
+-- due_date_observed, negative when early. days_late, posted_weekday and
+-- posted_hour_utc are null only when the posting time is unknown.
+-- posted_hour_utc is the hour in UTC.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE TABLE gold.filing_timing AS
+WITH first_version AS (
+  SELECT engagement_hk, filing_year, filing_period, filing_uuid, dt_posted
+  FROM silver.sat_engagement_filing
+  WHERE filing_type NOT IN ('RR', 'RA')
+  QUALIFY row_number() OVER (PARTITION BY engagement_hk, filing_year, filing_period
+                             ORDER BY dt_posted ASC NULLS LAST, filing_uuid) = 1),
+due AS (
+  SELECT period_end_date, due_date,
+         CASE WHEN month(rolled) = 1 AND dayofweek(rolled) = 2 AND day(rolled) BETWEEN 15 AND 21
+              THEN date_add(rolled, 1) ELSE rolled END AS due_date_observed
+  FROM (SELECT period_end_date, due_date,
+               CASE dayofweek(due_date) WHEN 7 THEN date_add(due_date, 2)
+                                        WHEN 1 THEN date_add(due_date, 1)
+                                        ELSE due_date END AS rolled
+        FROM (SELECT DISTINCT period_end_date, date_add(period_end_date, 20) AS due_date FROM gold.fact_filing))),
+timed AS (
+  SELECT f.engagement_hk, f.registrant_hk, f.client_hk, f.period_end_date, v.filing_uuid, v.dt_posted,
+         convert_timezone('America/New_York', v.dt_posted) AS posted_et
+  FROM gold.fact_filing f
+  JOIN first_version v ON v.engagement_hk = f.engagement_hk AND v.filing_year = f.filing_year AND v.filing_period = f.filing_period)
+SELECT t.filing_uuid, t.engagement_hk, hr.registrant_bk AS registrant_id, hc.client_bk AS client_id,
+       t.period_end_date, d.due_date, d.due_date_observed,
+       CAST(t.posted_et AS DATE) AS posted_date,
+       CAST(datediff(CAST(t.posted_et AS DATE), d.due_date_observed) AS INT) AS days_late,
+       date_format(t.posted_et, 'EEEE') AS posted_weekday,
+       CAST(hour(convert_timezone('UTC', t.dt_posted)) AS INT) AS posted_hour_utc
+FROM timed t
+JOIN due d ON d.period_end_date = t.period_end_date
+JOIN silver.hub_registrant hr ON hr.registrant_hk = t.registrant_hk
+JOIN silver.hub_client hc ON hc.client_hk = t.client_hk;
+
+-- ---------------------------------------------------------------------
+-- Peer outliers. Rule, stated once: within an issue code, every firm (or
+-- client) with reported income under that code is ranked by that income
+-- (topic_firm, topic_client, so rule 1 applies). pct_rank is the SQL
+-- percent rank, 0 for the lowest income and 1 for the highest, so the
+-- top 5 percent is pct_rank >= 0.95.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE TABLE gold.peer_rank AS
+SELECT kind, id, issue_code, income,
+       CAST(percent_rank() OVER (PARTITION BY kind, issue_code ORDER BY income) AS DOUBLE) AS pct_rank
+FROM (SELECT 'firm' AS kind, registrant_id AS id, issue_code, income FROM gold.topic_firm
+      UNION ALL SELECT 'client', client_id, issue_code, income FROM gold.topic_client);
+
+-- ---------------------------------------------------------------------
+-- Network edges. Rule, stated once: one row per pair, three pair kinds.
+-- client to firm, weighted by the income reported on the engagement;
+-- engagement to bill, weighted by the filings mentioning the bill, where
+-- the bill id is the congress and the key ("118-HR1"); lobbyist to
+-- engagement, weighted by the quarters the lobbyist was listed.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE TABLE gold.edge AS
+SELECT 'client' AS src_kind, client_id AS src_id, 'firm' AS dst_kind, registrant_id AS dst_id,
+       CAST(sum(total_income) AS DECIMAL(14,2)) AS weight
+FROM gold.engagement
+GROUP BY client_id, registrant_id
+UNION ALL
+SELECT 'engagement', engagement_hk, 'bill', concat(CAST(congress AS STRING), '-', bill_key),
+       CAST(filings_mentioning AS DECIMAL(14,2))
+FROM gold.bill_engagement
+UNION ALL
+SELECT 'lobbyist', lobbyist_id, 'engagement', engagement_hk, CAST(quarters_listed AS DECIMAL(14,2))
+FROM gold.lobbyist_engagement;
