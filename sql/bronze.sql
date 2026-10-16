@@ -72,6 +72,11 @@ FROM read_files('/Volumes/workspace/bronze/landing/legislators-historical.csv', 
 -- Curated by hand in this repo: which standing committee of each chamber
 -- has jurisdiction over each LDA general issue code (data/reference/
 -- issue_committees.csv, one row per issue code, chamber and thomas id).
+CREATE OR REPLACE TABLE bronze.ref_countries AS
+SELECT *, current_timestamp() AS load_date, 'lda.senate.gov/constants' AS record_source
+FROM read_files('/Volumes/workspace/bronze/landing/countries.csv', format => 'csv', header => true,
+                inferSchema => false);
+
 CREATE OR REPLACE TABLE bronze.ref_issue_committees AS
 SELECT *, current_timestamp() AS load_date, 'lobby-ledger/data/reference' AS record_source
 FROM read_files('/Volumes/workspace/bronze/landing/issue_committees.csv', format => 'csv', header => true,

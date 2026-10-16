@@ -1275,9 +1275,15 @@ SELECT * FROM entity_rows
 UNION ALL
 SELECT * FROM client_rows;
 
+-- country_name: ISO code to display name from the LDA constants endpoint.
+CREATE OR REPLACE TABLE gold.country_name AS
+SELECT upper(trim(country_code)) AS country_code, trim(country_name) AS country_name
+FROM bronze.ref_countries;
+
 -- foreign_country: one row per country, ranked by income.
 CREATE OR REPLACE TABLE gold.foreign_country AS
 SELECT country,
+       coalesce(n.country_name, f.country) AS country_name,
        CAST(count(DISTINCT engagement_hk) AS INT) AS engagement_count,
        CAST(count(DISTINCT client_hk) AS INT) AS client_count,
        CAST(count(DISTINCT foreign_entity_hk) AS INT) AS foreign_entity_count,
@@ -1288,8 +1294,9 @@ FROM (
          CASE WHEN row_number() OVER (PARTITION BY ff.country, ff.filing_uuid ORDER BY ff.foreign_entity_hk) = 1
               THEN ff.income ELSE 0 END AS income
   FROM gold.foreign_filing ff
-  JOIN silver.link_engagement e ON e.engagement_hk = ff.engagement_hk)
-GROUP BY country;
+  JOIN silver.link_engagement e ON e.engagement_hk = ff.engagement_hk) f
+LEFT JOIN gold.country_name n ON n.country_code = f.country
+GROUP BY country, n.country_name;
 
 -- foreign_country_quarter: income and engagements by country and quarter.
 CREATE OR REPLACE TABLE gold.foreign_country_quarter AS
