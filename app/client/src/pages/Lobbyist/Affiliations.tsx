@@ -1,8 +1,9 @@
 import { Link } from 'react-router';
+import { EntityLink, LINK_CLASS } from '@/components/EntityLink';
 import { lobbiedEntityPath } from '@/lib/routes';
 import { ConfidenceMark } from '@/pages/Lobbyist/ConfidenceMark';
 import { isEntityHash, kindLabel, toConfidence } from '@/pages/Lobbyist/affiliation';
-import { LINK_CLASS } from '@/components/EntityLink';
+import { splitCodes } from '@/pages/RevolvingDoor/rows';
 
 /** One row of `lobbyist_affiliations`. */
 export interface AffiliationRow {
@@ -12,6 +13,8 @@ export interface AffiliationRow {
   ref_name: string;
   matched_text: string | null;
   confidence: string | null;
+  /** Comma separated issue codes the committee has jurisdiction over; null for members and agencies. */
+  jurisdiction_issues?: string | null;
 }
 
 export interface AffiliationsProps {
@@ -24,7 +27,8 @@ export interface AffiliationsProps {
 /**
  * The committees, members of Congress and agencies whose names appear in the
  * lobbyist's disclosed positions. Only agencies have a page in the app, so
- * only they link; committee and member names are shown as matched.
+ * only they link; committee and member names are shown as matched, and a
+ * committee lists the issue areas under its jurisdiction as topic links.
  */
 export function Affiliations({ rows, lobbyistName, hasPositions }: AffiliationsProps) {
   return (
@@ -34,7 +38,8 @@ export function Affiliations({ rows, lobbyistName, hasPositions }: AffiliationsP
         <p className="text-sm text-muted-foreground">
           Each match is textual: a disclosed position names a standing committee, a member of Congress by title and
           surname, or a government entity that filings list as contacted. It rests on what {lobbyistName} disclosed and
-          says nothing about the role held. Agencies link to the filings that contacted them.
+          says nothing about the role held. Agencies link to the filings that contacted them; a committee lists the
+          issue areas it has jurisdiction over.
         </p>
       </figcaption>
       {rows.length === 0 ? (
@@ -48,6 +53,7 @@ export function Affiliations({ rows, lobbyistName, hasPositions }: AffiliationsP
           {rows.map((row) => {
             const linked = row.kind.trim().toLowerCase() === 'agency' && isEntityHash(row.ref_id);
             const matched = row.matched_text?.trim();
+            const issues = splitCodes(row.jurisdiction_issues);
             return (
               <li
                 key={`${row.kind}:${row.ref_id}`}
@@ -64,6 +70,14 @@ export function Affiliations({ rows, lobbyistName, hasPositions }: AffiliationsP
                   )}
                   {matched && (
                     <span className="block text-xs text-muted-foreground">Matched on &ldquo;{matched}&rdquo;</span>
+                  )}
+                  {issues.length > 0 && (
+                    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+                      <span className="text-muted-foreground">Jurisdiction over</span>
+                      {issues.map((code) => (
+                        <EntityLink key={code} kind="topic" id={code} />
+                      ))}
+                    </span>
                   )}
                 </span>
                 <ConfidenceMark confidence={toConfidence(row.confidence)} className="shrink-0" />

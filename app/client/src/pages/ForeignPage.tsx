@@ -7,6 +7,7 @@ import { count, money, toNumber } from '@/lib/format';
 import { foreignCountryPath } from '@/lib/routes';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { CountryTable } from '@/pages/Foreign/CountryTable';
+import { countryName } from '@/pages/Foreign/country';
 import { HeaderSkeleton, Retryable } from '@/pages/Topic/Retryable';
 
 /** The filing years in the data slice; every figure on the page covers this span. */
@@ -65,7 +66,7 @@ function ForeignBody({ onRetry }: { onRetry: () => void }) {
       {
         id: 'top',
         label: 'Largest',
-        value: top.country,
+        value: countryName(top),
         hint: `${compactMoney(toNumber(top.income))} on linked filings`,
         href: foreignCountryPath(top.country),
       },

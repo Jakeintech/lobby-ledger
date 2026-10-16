@@ -12,6 +12,7 @@ import { ConnectedRows } from '@/pages/Home/ConnectedRows';
 import { IncomeOverview } from '@/pages/Home/IncomeOverview';
 import { RetrySection } from '@/pages/Home/RetrySection';
 import { SearchResults } from '@/pages/Home/SearchResults';
+import { SurgeRow } from '@/pages/Home/SurgeRow';
 import { TopicOverview } from '@/pages/Home/TopicOverview';
 
 /** A search field in appearance, a button in fact: it opens the palette, which does the searching. */
@@ -86,6 +87,13 @@ export function HomePage() {
           Reported income across every engagement
         </h2>
         <RetrySection>{(retry) => <IncomeOverview onRetry={retry} />}</RetrySection>
+      </section>
+
+      <section aria-labelledby="surge-heading" className="space-y-4">
+        <h2 id="surge-heading" className="text-xl font-semibold tracking-tight">
+          Surging this quarter
+        </h2>
+        <RetrySection>{(retry) => <SurgeRow onRetry={retry} />}</RetrySection>
       </section>
 
       <section id={TOPICS_ANCHOR} aria-labelledby="topics-heading" className="scroll-mt-24 space-y-4">

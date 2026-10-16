@@ -3,13 +3,17 @@ import { Link } from 'react-router';
 import { Table, TableBody, TableCell, TableHeader, TableRow } from '@databricks/appkit-ui/react';
 import { count, money, toNumber } from '@/lib/format';
 import { foreignCountryPath } from '@/lib/routes';
+import { countryName } from '@/pages/Foreign/country';
 import { SortHead } from '@/pages/Lobbyist/SortHead';
 import { sortCaption, useSort } from '@/pages/Lobbyist/sort';
 import { LINK_CLASS } from '@/components/EntityLink';
 
 /** One row of `foreign_countries`: a country and its totals over 2024 to 2025. */
 export interface CountryRow {
+  /** The two-letter code, which the country page's URL carries. */
   country: string;
+  /** The name shown everywhere; null falls back to the code. */
+  country_name: string | null;
   engagement_count: number | string;
   client_count: number | string;
   foreign_entity_count: number | string;
@@ -32,7 +36,7 @@ const DESC_FIRST: ReadonlyArray<SortKey> = ['income', 'clients', 'engagements', 
 function compare(a: CountryRow, b: CountryRow, key: SortKey): number {
   switch (key) {
     case 'country':
-      return a.country.localeCompare(b.country);
+      return countryName(a).localeCompare(countryName(b));
     case 'income':
       return toNumber(a.income) - toNumber(b.income);
     case 'clients':
@@ -103,7 +107,7 @@ export function CountryTable({ rows }: { rows: CountryRow[] }) {
                     {count(row.rank)}
                   </span>
                   <Link to={foreignCountryPath(row.country)} className={LINK_CLASS}>
-                    {row.country}
+                    {countryName(row)}
                   </Link>
                 </TableCell>
                 <TableCell className="text-right align-top tabular-nums">{money(row.income)}</TableCell>

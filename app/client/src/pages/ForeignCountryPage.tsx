@@ -11,6 +11,7 @@ import { count, money, toNumber } from '@/lib/format';
 import { FOREIGN_PATH } from '@/lib/routes';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { CountryClientsTable } from '@/pages/Foreign/CountryClientsTable';
+import { countryName } from '@/pages/Foreign/country';
 import { HeaderSkeleton, Retryable } from '@/pages/Topic/Retryable';
 import { LINK_CLASS } from '@/components/EntityLink';
 
@@ -20,6 +21,7 @@ const PERIOD = '2024 to 2025';
 type CountryParams = { country: SQLStringMarker };
 
 interface SectionProps {
+  /** The country's name, for the section titles; the code stays in `params`. */
   country: string;
   params: CountryParams;
   onRetry: () => void;
@@ -27,13 +29,17 @@ interface SectionProps {
 
 const compactMoney = (n: number) => money(n, { compact: true });
 
-/** Foreign country page: one country, its linked income by quarter, and the clients behind it. */
+/**
+ * Foreign country page: one country, its linked income by quarter, and the
+ * clients behind it. The URL carries the two-letter code; the page shows
+ * the country's name wherever Gold supplies one.
+ */
 export function ForeignCountryPage() {
   const { country = '' } = useParams();
-  const name = country.trim();
+  const code = country.trim();
   return (
     <Retryable skeleton={<HeaderSkeleton />}>
-      {(retry) => <CountryBody key={name} country={name} onRetry={retry} />}
+      {(retry) => <CountryBody key={code} country={code} onRetry={retry} />}
     </Retryable>
   );
 }
@@ -42,7 +48,8 @@ function CountryBody({ country, onRetry }: { country: string; onRetry: () => voi
   const params = useMemo<CountryParams>(() => ({ country: sql.string(country) }), [country]);
   const detail = useAnalyticsQuery('foreign_country_detail', params);
   const row = detail.data?.[0];
-  usePageTitle(row ? `${row.country} foreign-linked lobbying` : country);
+  const name = row ? countryName(row) : country;
+  usePageTitle(row ? `${name} foreign-linked lobbying` : country);
 
   const tiles = useMemo<StatTile[]>(() => {
     if (!row) return [];
@@ -66,10 +73,10 @@ function CountryBody({ country, onRetry }: { country: string; onRetry: () => voi
         id: 'entities',
         label: 'Foreign entities',
         value: count(row.foreign_entity_count),
-        hint: `named on filings, based in ${row.country}`,
+        hint: `named on filings, based in ${name}`,
       },
     ];
-  }, [row]);
+  }, [row, name]);
 
   return (
     <div className="space-y-10">
@@ -87,14 +94,14 @@ function CountryBody({ country, onRetry }: { country: string; onRetry: () => voi
         {row && (
           <header className="space-y-5">
             <div className="space-y-2">
-              <h1 className="text-3xl sm:text-4xl">{row.country}</h1>
+              <h1 className="text-3xl sm:text-4xl">{name}</h1>
               <p className="text-muted-foreground">
                 Ranked {count(row.rank)} of all{' '}
                 <Link to={FOREIGN_PATH} className={LINK_CLASS}>
                   countries
                 </Link>{' '}
-                by income on filings that name a foreign entity from {row.country} or a client based there, {PERIOD}. A
-                filing counts in full toward every country it is linked to.
+                by income on filings that name a foreign entity from {name} or a client based there, {PERIOD}. A filing
+                counts in full toward every country it is linked to.
               </p>
             </div>
             <StatTiles tiles={tiles} columns={4} />
@@ -104,8 +111,8 @@ function CountryBody({ country, onRetry }: { country: string; onRetry: () => voi
 
       {row && (
         <>
-          <Retryable>{(retry) => <CountryQuarters country={row.country} params={params} onRetry={retry} />}</Retryable>
-          <Retryable>{(retry) => <CountryClients country={row.country} params={params} onRetry={retry} />}</Retryable>
+          <Retryable>{(retry) => <CountryQuarters country={name} params={params} onRetry={retry} />}</Retryable>
+          <Retryable>{(retry) => <CountryClients country={name} params={params} onRetry={retry} />}</Retryable>
         </>
       )}
     </div>

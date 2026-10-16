@@ -37,6 +37,54 @@ function pluralize(value: number | string, singular: string): string {
   return `${count(n)} ${n === 1 ? singular : `${singular}s`}`;
 }
 
+/** `house` becomes `House`; anything else passes through in sentence case. */
+function chamberLabel(chamber: string | null | undefined): string {
+  const text = (chamber ?? '').trim().toLowerCase();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+}
+
+/** The chamber to show after a committee name, or nothing when the name already opens with it. */
+function chamberSuffix(name: string, chamber: string | null | undefined): string {
+  const label = chamberLabel(chamber);
+  return label && name.toLowerCase().startsWith(label.toLowerCase()) ? '' : label;
+}
+
+interface JurisdictionRow {
+  chamber: string;
+  thomas_id: string;
+  committee_name: string;
+}
+
+/**
+ * One line naming the committees with jurisdiction over the issue code,
+ * from the hand-curated map in Gold, with the chamber after any name that
+ * does not already open with it, such as a joint committee. Nothing renders
+ * while the query loads or when the code has no committee on file, so the
+ * header never waits on it.
+ */
+function JurisdictionLine({ rows }: { rows: ReadonlyArray<JurisdictionRow> }) {
+  const committees = rows
+    .map((row) => {
+      const name = row.committee_name.trim();
+      return { id: row.thomas_id, name, chamber: chamberSuffix(name, row.chamber) };
+    })
+    .filter((row) => row.name);
+  if (committees.length === 0) return null;
+  return (
+    <p className="text-sm">
+      <span className="text-muted-foreground">Committees with jurisdiction: </span>
+      {committees.map((committee, i) => (
+        <span key={committee.id}>
+          {i > 0 && ', '}
+          <span className="font-medium text-foreground">{committee.name}</span>
+          {committee.chamber && <span className="text-muted-foreground"> ({committee.chamber})</span>}
+        </span>
+      ))}
+      .
+    </p>
+  );
+}
+
 /** Topic page: one issue code, its income by quarter, who pays, who is paid, and the bills cited. */
 export function TopicPage() {
   const { code = '' } = useParams();
@@ -51,6 +99,7 @@ export function TopicPage() {
 function TopicBody({ code, onRetry }: { code: string; onRetry: () => void }) {
   const params = useMemo<TopicParams>(() => ({ code: sql.string(code) }), [code]);
   const detail = useAnalyticsQuery('topic_detail', params);
+  const jurisdiction = useAnalyticsQuery('jurisdiction_for_issue', params);
   const topic = detail.data?.[0];
   usePageTitle(topic ? `${code} ${topic.issue_name}` : code);
 
@@ -98,6 +147,7 @@ function TopicBody({ code, onRetry }: { code: string; onRetry: () => void }) {
                 Issue code {code}. Ranked {count(topic.rank)} of all issue areas by reported income, {PERIOD}. A filing
                 counts in full toward every issue it lists.
               </p>
+              {!jurisdiction.loading && !jurisdiction.error && <JurisdictionLine rows={jurisdiction.data ?? []} />}
             </div>
             <StatTiles tiles={tiles} columns={4} />
           </header>

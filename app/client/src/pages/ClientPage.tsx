@@ -14,6 +14,10 @@ import { count, money, quarterLabel, toNumber } from '@/lib/format';
 import { usePageTitle } from '@/lib/usePageTitle';
 import { BillsAndEntities } from '@/pages/Client/BillsAndEntities';
 import { ClientLobbyists } from '@/pages/Client/ClientLobbyists';
+import { FilingTiming } from '@/pages/Client/FilingTiming';
+import { OrganizationLine } from '@/pages/Client/OrganizationLine';
+import { PeerLine } from '@/pages/Client/PeerLine';
+import { SurgeMark } from '@/pages/Client/SurgeMark';
 
 /**
  * The analytics hook shares one request per query and parameter set and
@@ -77,7 +81,12 @@ function sentence(text: string | null | undefined): string {
 
 const formatMoney = (n: number) => money(n);
 
-/** Client page: income by quarter, the firms it hired, and the lobbyists those firms listed. */
+/**
+ * Client page: income by quarter, the firms it hired, the lobbyists those
+ * firms listed, and when its reports were posted. The header adds the
+ * organization the client row belongs to, a surge mark for the newest
+ * quarter and the client's rank among peers on each issue.
+ */
 export function ClientPage() {
   const { id = '' } = useParams();
   const { attempt, settling, retry } = useRemount();
@@ -171,7 +180,10 @@ function ClientBody({ id, onRetry }: { id: string; onRetry: () => void }) {
                 in 2024 to 2025.{description}
               </p>
             </div>
+            <SurgeMark kind="client" id={id} onRetry={onRetry} />
+            <OrganizationLine id={id} clientName={client.name} onRetry={onRetry} />
             <TopicLinks codes={client.issue_codes} />
+            <PeerLine kind="client" id={id} onRetry={onRetry} />
             <StatTiles tiles={tiles} columns={4} />
           </header>
         )}
@@ -236,6 +248,10 @@ function ClientBody({ id, onRetry }: { id: string; onRetry: () => void }) {
         >
           <ClientLobbyists rows={lobbyistRows} clientName={name} />
         </PageState>
+      </Section>
+
+      <Section title="Filing timing">
+        <FilingTiming kind="client" id={id} name={name} onRetry={onRetry} />
       </Section>
     </div>
   );

@@ -14,6 +14,9 @@ import type { StatTile } from '@/components/StatTiles';
 import { count, money, quarterLabel, toNumber } from '@/lib/format';
 import { clientPath } from '@/lib/routes';
 import { usePageTitle } from '@/lib/usePageTitle';
+import { FilingTiming } from '@/pages/Client/FilingTiming';
+import { PeerLine } from '@/pages/Client/PeerLine';
+import { SurgeMark } from '@/pages/Client/SurgeMark';
 import { FirmLobbyists } from '@/pages/Firm/FirmLobbyists';
 
 /**
@@ -84,7 +87,12 @@ function sentence(text: string | null | undefined): string {
 
 const formatMoney = (n: number) => money(n);
 
-/** Firm page: income by quarter across all clients, the clients ranked, and the roster of lobbyists. */
+/**
+ * Firm page: income by quarter across all clients, the clients ranked, the
+ * roster of lobbyists, and when its reports were posted. The header adds a
+ * surge mark for the newest quarter and the firm's rank among peers on each
+ * issue. The timing figure, peer line and surge mark live under pages/Client.
+ */
 export function FirmPage() {
   const { id = '' } = useParams();
   const { attempt, settling, retry } = useRemount();
@@ -187,7 +195,9 @@ function FirmBody({ id, onRetry }: { id: string; onRetry: () => void }) {
                 2024 to 2025.{description}
               </p>
             </div>
+            <SurgeMark kind="firm" id={id} onRetry={onRetry} />
             <TopicLinks codes={firm.issue_codes} />
+            <PeerLine kind="firm" id={id} onRetry={onRetry} />
             <StatTiles tiles={tiles} columns={4} />
           </header>
         )}
@@ -260,6 +270,10 @@ function FirmBody({ id, onRetry }: { id: string; onRetry: () => void }) {
         >
           <FirmLobbyists rows={lobbyistRows} firmName={name} />
         </PageState>
+      </Section>
+
+      <Section title="Filing timing">
+        <FilingTiming kind="firm" id={id} name={name} onRetry={onRetry} />
       </Section>
     </div>
   );

@@ -50,7 +50,7 @@ function compare(a: CountryClientRow, b: CountryClientRow, key: SortKey): number
 /**
  * The clients linked to one country, with the firm that filed for them,
  * the foreign entities those filings named and the issue codes they listed.
- * Sortable by client, firm or income.
+ * Sortable by client, firm or income. `country` is the name to show, not the code.
  */
 export function CountryClientsTable({ rows, country }: { rows: CountryClientRow[]; country: string }) {
   const { sort, toggle } = useSort<SortKey>({ key: 'income', direction: 'desc' }, DESC_FIRST);

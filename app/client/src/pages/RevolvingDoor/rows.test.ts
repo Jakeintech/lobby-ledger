@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeRows, splitCodes, summarize, toFlag } from './rows';
+import { committeeJurisdiction, hasCommittee, normalizeRows, splitCodes, summarize, toFlag } from './rows';
 import type { RawRevolvingDoorRow } from './rows';
 
 function raw(overrides: Partial<RawRevolvingDoorRow> = {}): RawRevolvingDoorRow {
@@ -16,6 +16,7 @@ function raw(overrides: Partial<RawRevolvingDoorRow> = {}): RawRevolvingDoorRow 
     issue_codes: 'TAX, TRD',
     income: '250000.0',
     lobbies_former_employer: 'false',
+    jurisdiction_match: 'true',
     confidence: 'high',
     ...overrides,
   };
@@ -43,14 +44,37 @@ describe('normalizeRows', () => {
     const [row] = normalizeRows([raw()]);
     expect(row.income).toBe(250000);
     expect(row.lobbies_former_employer).toBe(false);
+    expect(row.jurisdiction_match).toBe(true);
     expect(row.confidence).toBe('high');
     expect(row.full_name).toBe('Zachary Rudisill');
   });
 
-  it('leaves the flag and confidence null when the query does not carry them', () => {
-    const [row] = normalizeRows([raw({ lobbies_former_employer: undefined, confidence: undefined })]);
+  it('leaves the flags and confidence null when the query does not carry them', () => {
+    const [row] = normalizeRows([
+      raw({ lobbies_former_employer: undefined, jurisdiction_match: undefined, confidence: undefined }),
+    ]);
     expect(row.lobbies_former_employer).toBeNull();
+    expect(row.jurisdiction_match).toBeNull();
     expect(row.confidence).toBeNull();
+  });
+});
+
+describe('committeeJurisdiction', () => {
+  it('keeps the flag for a committee affiliation, joined kinds included', () => {
+    const [committee, both] = normalizeRows([raw(), raw({ kind: 'committee, member', jurisdiction_match: 'false' })]);
+    expect(hasCommittee(committee)).toBe(true);
+    expect(committeeJurisdiction(committee)).toBe(true);
+    expect(committeeJurisdiction(both)).toBe(false);
+  });
+
+  it('is null for a member or agency affiliation whatever the query sent', () => {
+    const [member, agency] = normalizeRows([
+      raw({ kind: 'member', ref_name: 'Nicholas Mavroules', jurisdiction_match: 'false' }),
+      raw({ kind: 'agency', ref_name: 'Department of Energy', jurisdiction_match: 'true' }),
+    ]);
+    expect(hasCommittee(member)).toBe(false);
+    expect(committeeJurisdiction(member)).toBeNull();
+    expect(committeeJurisdiction(agency)).toBeNull();
   });
 });
 

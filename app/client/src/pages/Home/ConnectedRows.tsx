@@ -13,6 +13,7 @@ import {
   lobbiedEntityPath,
   trendPath,
 } from '@/lib/routes';
+import { countryName } from '@/pages/Foreign/country';
 import { RetrySection } from '@/pages/Home/RetrySection';
 import { LINK_CLASS } from '@/components/EntityLink';
 
@@ -129,7 +130,7 @@ function TopForeignCountries({ onRetry }: { onRetry: () => void }) {
       [...(data ?? [])]
         .map((row) => ({
           id: row.country,
-          name: row.country,
+          name: countryName(row),
           value: toNumber(row.income),
           href: foreignCountryPath(row.country),
         }))

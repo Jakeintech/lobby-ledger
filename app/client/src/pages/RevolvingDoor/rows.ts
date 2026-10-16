@@ -20,6 +20,7 @@ export interface RawRevolvingDoorRow {
   issue_codes: string | null;
   income: number | string | null;
   lobbies_former_employer?: boolean | string | number | null;
+  jurisdiction_match?: boolean | string | number | null;
   confidence?: string | null;
 }
 
@@ -38,6 +39,8 @@ export interface RevolvingDoorRow {
   income: number;
   /** Null when the query carries no flag column. */
   lobbies_former_employer: boolean | null;
+  /** True when the committee the lobbyist left has jurisdiction over an issue code on the engagement; null when absent. */
+  jurisdiction_match: boolean | null;
   /** Null when the query carries no confidence column or the match has none. */
   confidence: Confidence | null;
 }
@@ -66,8 +69,23 @@ export function normalizeRows(rows: ReadonlyArray<RawRevolvingDoorRow>): Revolvi
     issue_codes: row.issue_codes ?? null,
     income: toNumber(row.income),
     lobbies_former_employer: toFlag(row.lobbies_former_employer),
+    jurisdiction_match: toFlag(row.jurisdiction_match),
     confidence: toConfidence(row.confidence),
   }));
+}
+
+/** True when the disclosed affiliation includes a committee; only a committee has a jurisdiction to test. */
+export function hasCommittee(row: Pick<RevolvingDoorRow, 'kind'>): boolean {
+  return /committee/i.test(row.kind);
+}
+
+/**
+ * The jurisdiction flag for a committee affiliation, and null for a member
+ * or agency one, where the question was never asked and `No` would read as
+ * a finding.
+ */
+export function committeeJurisdiction(row: Pick<RevolvingDoorRow, 'kind' | 'jurisdiction_match'>): boolean | null {
+  return hasCommittee(row) ? row.jurisdiction_match : null;
 }
 
 /** `EDU, TAX` becomes `['EDU', 'TAX']`, deduplicated. */

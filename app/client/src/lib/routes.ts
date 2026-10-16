@@ -31,6 +31,7 @@ export const ROUTE_PATTERNS = {
   lobbiedEntity: '/lobbied/:id',
   revolvingDoor: REVOLVING_DOOR_PATH,
   about: ABOUT_PATH,
+  organization: '/organization/:id',
 } as const;
 
 /** Home scrolled to the issue-area section. */
@@ -102,4 +103,9 @@ export function lobbiedEntityPath(id: string | number): string {
 export function searchPath(q: string): string {
   const trimmed = q.trim();
   return trimmed ? `/?q=${encodeURIComponent(trimmed)}` : HOME_PATH;
+}
+
+/** `id` is the organization's `organization_hk`, the hash of its normalized name. */
+export function organizationPath(id: string | number): string {
+  return `/organization/${encodeURIComponent(String(id))}`;
 }

@@ -6,11 +6,11 @@ import { ConfidenceMark } from '@/pages/Lobbyist/ConfidenceMark';
 import { kindLabel } from '@/pages/Lobbyist/affiliation';
 import { SortHead } from '@/pages/Lobbyist/SortHead';
 import { sortCaption, useSort } from '@/pages/Lobbyist/sort';
-import { splitCodes } from '@/pages/RevolvingDoor/rows';
+import { committeeJurisdiction, hasCommittee, splitCodes } from '@/pages/RevolvingDoor/rows';
 import type { RevolvingDoorRow } from '@/pages/RevolvingDoor/rows';
 import { useOverflows } from '@/pages/RevolvingDoor/useOverflows';
 
-type SortKey = 'lobbyist' | 'affiliation' | 'client' | 'firm' | 'income' | 'flag';
+type SortKey = 'lobbyist' | 'affiliation' | 'client' | 'firm' | 'income' | 'flag' | 'jurisdiction';
 
 const LABELS: Record<SortKey, string> = {
   lobbyist: 'Lobbyist',
@@ -19,9 +19,14 @@ const LABELS: Record<SortKey, string> = {
   firm: 'Firm',
   income: 'Income',
   flag: 'Lobbies former employer',
+  jurisdiction: 'Jurisdiction',
 };
 
-const DESC_FIRST: ReadonlyArray<SortKey> = ['income', 'flag'];
+const DESC_FIRST: ReadonlyArray<SortKey> = ['income', 'flag', 'jurisdiction'];
+
+/** One line on what the jurisdiction column means, for the caption at the widths that show the column. */
+const JURISDICTION_NOTE =
+  'Jurisdiction is yes when the committee a lobbyist disclosed leaving has jurisdiction over an issue code on the engagement; member and agency matches have no committee to test.';
 
 function flagRank(value: boolean | null): number {
   return value === null ? -1 : value ? 1 : 0;
@@ -41,7 +46,19 @@ function compare(a: RevolvingDoorRow, b: RevolvingDoorRow, key: SortKey): number
       return a.income - b.income;
     case 'flag':
       return flagRank(a.lobbies_former_employer) - flagRank(b.lobbies_former_employer);
+    case 'jurisdiction':
+      return flagRank(committeeJurisdiction(a)) - flagRank(committeeJurisdiction(b));
   }
+}
+
+/** `Yes`, `No` or `Not recorded`, for the two yes or no columns. */
+function YesNo({ value }: { value: boolean | null }) {
+  if (value === null) return <span className="text-muted-foreground">Not recorded</span>;
+  return value ? (
+    <span className="font-medium text-foreground">Yes</span>
+  ) : (
+    <span className="text-muted-foreground">No</span>
+  );
 }
 
 export interface RevolvingDoorTableProps {
@@ -58,8 +75,10 @@ export interface RevolvingDoorTableProps {
  * One row per lobbyist, affiliation and engagement: who they are, what they
  * disclosed, who pays them now and for what. Sortable by every column but
  * the issue codes. Income sits second so the headline figure is on screen
- * at phone width; the firm, issue and flag columns hide there, the minimum
- * widths apply from sm up, and the caption says when the table scrolls.
+ * at phone width; the firm, issue, flag and jurisdiction columns hide
+ * there, the minimum widths apply from sm up, and the caption says when
+ * the table scrolls. The jurisdiction column appears when the rows carry it
+ * and answers only for committee affiliations; the rest say so and sort last.
  */
 export function RevolvingDoorTable({ rows, title, subtitle, showFlag }: RevolvingDoorTableProps) {
   const { sort, toggle } = useSort<SortKey>({ key: 'income', direction: 'desc' }, DESC_FIRST);
@@ -73,6 +92,7 @@ export function RevolvingDoorTable({ rows, title, subtitle, showFlag }: Revolvin
         a.engagement_hk.localeCompare(b.engagement_hk)
     );
   }, [rows, sort]);
+  const showJurisdiction = useMemo(() => rows.some((row) => row.jurisdiction_match !== null), [rows]);
   const headProps = { sort, onSort: toggle };
   const [scrollRef, scrolls] = useOverflows<HTMLDivElement>();
 
@@ -81,7 +101,9 @@ export function RevolvingDoorTable({ rows, title, subtitle, showFlag }: Revolvin
       <figcaption className="border-t border-border pt-3">
         <p className="font-medium text-foreground">{title}</p>
         <p className="text-sm text-muted-foreground">
-          {subtitle} Click a column to sort.{scrolls && ' Scroll sideways for more columns.'}
+          {subtitle} {showJurisdiction && <span className="hidden md:inline">{JURISDICTION_NOTE} </span>}Click a column
+          to sort.
+          {scrolls && ' Scroll sideways for more columns.'}
         </p>
       </figcaption>
       <div ref={scrollRef} className="mt-3 w-full overflow-x-auto border-t border-border">
@@ -97,6 +119,14 @@ export function RevolvingDoorTable({ rows, title, subtitle, showFlag }: Revolvin
               <SortHead sortKey="client" label={LABELS.client} {...headProps} />
               <SortHead sortKey="firm" label={LABELS.firm} className="hidden md:table-cell" {...headProps} />
               <TableHead className="hidden lg:table-cell">Issues</TableHead>
+              {showJurisdiction && (
+                <SortHead
+                  sortKey="jurisdiction"
+                  label={LABELS.jurisdiction}
+                  className="hidden md:table-cell"
+                  {...headProps}
+                />
+              )}
               {showFlag && (
                 <SortHead sortKey="flag" label={LABELS.flag} className="hidden md:table-cell" {...headProps} />
               )}
@@ -129,15 +159,18 @@ export function RevolvingDoorTable({ rows, title, subtitle, showFlag }: Revolvin
                     ))}
                   </div>
                 </TableCell>
+                {showJurisdiction && (
+                  <TableCell className="hidden align-top md:table-cell">
+                    {hasCommittee(row) ? (
+                      <YesNo value={row.jurisdiction_match} />
+                    ) : (
+                      <span className="text-muted-foreground">No committee</span>
+                    )}
+                  </TableCell>
+                )}
                 {showFlag && (
                   <TableCell className="hidden align-top md:table-cell">
-                    {row.lobbies_former_employer === null ? (
-                      <span className="text-muted-foreground">Not recorded</span>
-                    ) : row.lobbies_former_employer ? (
-                      <span className="font-medium text-foreground">Yes</span>
-                    ) : (
-                      <span className="text-muted-foreground">No</span>
-                    )}
+                    <YesNo value={row.lobbies_former_employer} />
                   </TableCell>
                 )}
               </TableRow>

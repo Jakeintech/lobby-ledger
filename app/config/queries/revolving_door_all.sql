@@ -2,7 +2,7 @@
 SELECT r.lobbyist_id, r.engagement_hk, r.full_name, r.kind, r.ref_name,
        r.client_id, r.client, r.registrant_id, r.firm, r.issue_codes,
        CAST(r.income AS DOUBLE) AS income,
-       r.lobbies_former_employer,
+       r.lobbies_former_employer, r.jurisdiction_match,
        CASE a.confidence_rank WHEN 0 THEN 'high' WHEN 1 THEN 'medium' END AS confidence
 FROM workspace.gold.revolving_door r
 LEFT JOIN (

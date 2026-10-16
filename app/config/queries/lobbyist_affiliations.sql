@@ -1,6 +1,6 @@
 -- @param id STRING
--- Lobbyist page section: committees, members and agencies matched from one lobbyist's disclosed positions.
-SELECT lobbyist_id, kind, ref_id, ref_name, matched_text, confidence
+-- Lobbyist page section: committees, members and agencies matched from one lobbyist's disclosed positions, with each committee's jurisdiction issues.
+SELECT lobbyist_id, kind, ref_id, ref_name, matched_text, confidence, jurisdiction_issues
 FROM workspace.gold.lobbyist_affiliation
 WHERE lobbyist_id = :id
 ORDER BY confidence, kind, ref_name

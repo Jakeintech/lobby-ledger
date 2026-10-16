@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { HeatmapChart, useChartUITokens, useThemeColors } from '@databricks/appkit-ui/react';
 import type { ChartClickDatum } from '@databricks/appkit-ui/react';
 import { count, money, quarterLabel } from '@/lib/format';
@@ -34,11 +34,110 @@ const ROW_HEIGHT = 26;
 const LABEL_WIDTH = { narrow: 150, wide: 220 } as const;
 const WIDE_FIGURE = 640;
 const CELL_MIN_WIDTH = 44;
+/**
+ * Below this figure width the canvas gives way to an HTML grid: the canvas
+ * needs more than a phone's width for its labels and cells and so scrolled
+ * sideways, and on phones it has rendered blank.
+ */
+const PHONE_FIGURE = 480;
+
+/** `Q1`, `Q2` and the year, for the two-line column headers of the phone grid. */
+function quarterParts(iso: string): { year: string; quarter: string } {
+  const label = quarterLabel(iso);
+  const match = /^(Q[1-4]) (\d{4})$/.exec(label);
+  return match ? { year: match[2], quarter: match[1] } : { year: '', quarter: label };
+}
+
+interface PhoneGridProps {
+  rows: HeatmapRow[];
+  quarters: ReadonlyArray<string>;
+  max: number;
+  ramp: ReadonlyArray<string>;
+  format: (value: number) => string;
+  title: string;
+}
+
+/**
+ * The same cells as the canvas, drawn as a table that fits a phone: a
+ * truncated name per row, a year header spanning its quarters and `Q1` to
+ * `Q4` beneath it, and one shaded cell per quarter. Row names are links,
+ * and so is every cell, each carrying its figure for the hover title and
+ * for screen readers, so the caption's promise holds at this width too.
+ */
+function PhoneGrid({ rows, quarters, max, ramp, format, title }: PhoneGridProps) {
+  const years = useMemo(() => {
+    const groups: Array<{ year: string; span: number }> = [];
+    for (const quarter of quarters) {
+      const { year } = quarterParts(quarter);
+      const last = groups[groups.length - 1];
+      if (last && last.year === year) last.span += 1;
+      else groups.push({ year, span: 1 });
+    }
+    return groups;
+  }, [quarters]);
+
+  const cellColor = (value: number): string => {
+    if (value <= 0 || max <= 0 || ramp.length === 0) return 'var(--muted)';
+    const index = Math.min(ramp.length - 1, Math.floor((value / max) * ramp.length));
+    return ramp[index];
+  };
+
+  return (
+    <table className="mt-3 w-full table-fixed border-separate border-spacing-x-0.5 border-spacing-y-0.5 text-xs">
+      <caption className="sr-only">{title}</caption>
+      <thead>
+        <tr>
+          <td className="w-[38%]" />
+          {years.map((group) => (
+            <th key={group.year} scope="colgroup" colSpan={group.span} className="font-normal text-muted-foreground">
+              {group.year}
+            </th>
+          ))}
+        </tr>
+        <tr>
+          <td />
+          {quarters.map((quarter) => (
+            <th key={quarter} scope="col" className="font-normal tabular-nums text-muted-foreground">
+              {quarterParts(quarter).quarter}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.id}>
+            <th scope="row" className="truncate pr-2 text-left font-normal">
+              <Link to={row.href} className="font-medium text-primary underline-offset-4 hover:underline">
+                {row.name}
+              </Link>
+            </th>
+            {quarters.map((quarter, i) => {
+              const value = row.values[i] ?? 0;
+              const label = `${quarterLabel(quarter)}: ${format(value)}`;
+              return (
+                <td key={quarter} className="p-0">
+                  <Link
+                    to={row.href}
+                    aria-label={`${row.name}, ${label}`}
+                    title={label}
+                    className="block h-7 rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+                    style={{ backgroundColor: cellColor(value) }}
+                  />
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 /**
  * Rows by quarter as AppKit's HeatmapChart on the sequential ledger ramp.
  * Clicking a cell opens the row's page; the list of row links after the
- * canvas gives keyboards and screen readers the same destinations.
+ * canvas gives keyboards and screen readers the same destinations. At phone
+ * width the canvas gives way to {@link PhoneGrid}.
  *
  * BaseChart merges `options` shallowly, so hiding the gradient bar means
  * passing a whole visualMap (range, ramp and `show: false`) rather than a
@@ -57,10 +156,11 @@ export function Heatmap({
   const ramp = useThemeColors('sequential');
   const [ref, width] = useWidth<HTMLElement>();
   const labelWidth = width >= WIDE_FIGURE ? LABEL_WIDTH.wide : LABEL_WIDTH.narrow;
+  const phone = width > 0 && width < PHONE_FIGURE;
   const labels = useMemo(() => quarters.map((q) => quarterLabel(q)), [quarters]);
 
   // Row names must be unique because the chart keys cells by name.
-  const named = useMemo(() => {
+  const named = useMemo<HeatmapRow[]>(() => {
     const seen = new Set<string>();
     return rows.map((row) => {
       const name = seen.has(row.name) ? `${row.name} (${row.id})` : row.name;
@@ -135,6 +235,8 @@ export function Heatmap({
       </figcaption>
       {named.length === 0 ? (
         <p className="py-6 text-sm text-muted-foreground">{emptyMessage}</p>
+      ) : phone ? (
+        <PhoneGrid rows={named} quarters={quarters} max={max} ramp={ramp} format={valueFormatter} title={title} />
       ) : (
         <>
           <div className="mt-3 min-w-0 overflow-x-auto">

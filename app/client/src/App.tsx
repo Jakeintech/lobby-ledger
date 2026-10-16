@@ -13,6 +13,7 @@ import { LobbiedEntityPage } from '@/pages/LobbiedEntityPage';
 import { LobbiedPage } from '@/pages/LobbiedPage';
 import { LobbyistPage } from '@/pages/LobbyistPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
+import { OrganizationPage } from '@/pages/OrganizationPage';
 import { RevolvingDoorPage } from '@/pages/RevolvingDoorPage';
 import { TopicPage } from '@/pages/TopicPage';
 import { TrendPage } from '@/pages/TrendPage';
@@ -34,6 +35,7 @@ export default function App() {
           <Route path={ROUTE_PATTERNS.billInCongress} element={<BillPage />} />
           <Route path={ROUTE_PATTERNS.client} element={<ClientPage />} />
           <Route path={ROUTE_PATTERNS.firm} element={<FirmPage />} />
+          <Route path={ROUTE_PATTERNS.organization} element={<OrganizationPage />} />
           <Route path={ROUTE_PATTERNS.lobbyist} element={<LobbyistPage />} />
           <Route path={ROUTE_PATTERNS.trends} element={<TrendsPage />} />
           <Route path={ROUTE_PATTERNS.trend} element={<TrendPage />} />
