@@ -5,7 +5,7 @@ import { QuarterChart } from '@/components/QuarterChart';
 import type { QuarterMarker } from '@/components/QuarterChart';
 import { toNumber } from '@/lib/format';
 import { padQuarters } from '@/lib/ledger';
-import { PERIOD } from '@/pages/Bill/billText';
+import { PERIOD, milestoneName } from '@/pages/Bill/billText';
 import type { BillParams } from '@/pages/Bill/billText';
 
 export interface BillQuartersProps {
@@ -39,7 +39,7 @@ export function BillQuarters({ label, params, onRetry, selected, onSelect }: Bil
     () =>
       (milestones.data ?? [])
         .filter((row) => row.milestone_date && row.milestone?.trim())
-        .map((row) => ({ date: row.milestone_date, label: row.milestone.trim() })),
+        .map((row) => ({ date: row.milestone_date, label: milestoneName(row.milestone) })),
     [milestones.data]
   );
   const milestoneNote = milestones.loading

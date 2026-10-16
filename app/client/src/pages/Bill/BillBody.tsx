@@ -9,6 +9,7 @@ import type { StatTile } from '@/components/StatTiles';
 import { billLabel, count, money, toNumber } from '@/lib/format';
 import { BillCiters, BillEngagements } from '@/pages/Bill/BillEngagements';
 import { BillQuarters } from '@/pages/Bill/BillQuarters';
+import { MilestoneWindows } from '@/pages/Bill/MilestoneWindows';
 import { PERIOD, longDate } from '@/pages/Bill/billText';
 import type { BillParams } from '@/pages/Bill/billText';
 import { CONGRESSES, billsCongressPath, ordinal } from '@/pages/Bills/congress';
@@ -20,7 +21,7 @@ export interface BillBodyProps {
   onRetry: () => void;
 }
 
-/** One bill in one Congress: the header and tiles, the quarterly chart, the top citers and the engagement table. */
+/** One bill in one Congress: the header and tiles, the quarterly chart, the milestone windows, the top citers and the engagement table. */
 export function BillBody({ billKey, congress, onRetry }: BillBodyProps) {
   const params = useMemo<BillParams>(
     () => ({ congress: sql.string(String(congress)), key: sql.string(billKey) }),
@@ -131,6 +132,7 @@ export function BillBody({ billKey, congress, onRetry }: BillBodyProps) {
               <BillQuarters label={label} params={params} onRetry={retry} selected={quarter} onSelect={setQuarter} />
             )}
           </Retryable>
+          <Retryable>{(retry) => <MilestoneWindows label={label} params={params} onRetry={retry} />}</Retryable>
           <Retryable>{(retry) => <BillCiters label={label} params={params} onRetry={retry} />}</Retryable>
           <Retryable>
             {(retry) => <BillEngagements label={label} params={params} onRetry={retry} quarter={quarter} />}

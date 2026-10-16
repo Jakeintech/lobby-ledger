@@ -15,3 +15,20 @@ export function longDate(iso: string | null | undefined): string | null {
 
 /** The parameters every bill section query takes. */
 export type BillParams = { congress: SQLStringMarker; key: SQLStringMarker };
+
+/** The milestone keys `gold.bill_milestone` uses, in legislative order, and their plain names. */
+const MILESTONE_NAMES: ReadonlyArray<readonly [string, string]> = [
+  ['introduced', 'Introduced'],
+  ['reported', 'Reported by committee'],
+  ['passed_house', 'Passed House'],
+  ['passed_senate', 'Passed Senate'],
+  ['to_president', 'Sent to the President'],
+  ['became_law', 'Became law'],
+];
+
+/** `passed_house` becomes `Passed House`; a key Gold does not define is shown with its underscores as spaces. */
+export function milestoneName(key: string | null | undefined): string {
+  const trimmed = (key ?? '').trim();
+  const known = MILESTONE_NAMES.find(([k]) => k === trimmed);
+  return known ? known[1] : trimmed.replace(/_/g, ' ');
+}

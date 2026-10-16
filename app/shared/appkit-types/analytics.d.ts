@@ -143,6 +143,27 @@ declare module "@databricks/appkit-ui/react" {
           bill_key: string;
         }>;
       };
+    bill_milestone_windows: {
+        name: "bill_milestone_windows";
+        parameters: {
+          /** STRING - use sql.string() */
+          congress: SQLStringMarker;
+          /** STRING - use sql.string() */
+          key: SQLStringMarker;
+        };
+        result: Array<{
+          /** @sqlType STRING */
+          milestone: string;
+          /** @sqlType DATE */
+          milestone_date: string;
+          /** @sqlType INT */
+          filings_90d_before: number;
+          /** @sqlType DOUBLE */
+          income_90d_before: number;
+          /** @sqlType INT */
+          clients_90d_before: number;
+        }>;
+      };
     bill_milestones: {
         name: "bill_milestones";
         parameters: {
