@@ -131,6 +131,29 @@ UNION ALL SELECT 'bill_quarter unique key', count(*) - count(DISTINCT congress, 
 UNION ALL SELECT 'bill_quarter not_null key', count(*) FROM gold.bill_quarter WHERE congress IS NULL OR bill_key IS NULL OR period_end_date IS NULL
 UNION ALL SELECT 'bill_engagement unique key', count(*) - count(DISTINCT congress, bill_key, engagement_hk) FROM gold.bill_engagement
 UNION ALL SELECT 'bill_engagement not_null key', count(*) FROM gold.bill_engagement WHERE congress IS NULL OR bill_key IS NULL OR engagement_hk IS NULL
+UNION ALL SELECT 'bill_alias unique key', count(*) - count(DISTINCT congress, bill_key, alias) FROM gold.bill_alias
+UNION ALL SELECT 'bill_alias not_null key', count(*) FROM gold.bill_alias WHERE congress IS NULL OR bill_key IS NULL OR alias IS NULL
+UNION ALL SELECT 'bill_alias no alias shorter than 6 characters', count(*) FROM gold.bill_alias WHERE length(alias) < 6
+UNION ALL SELECT 'bill_alias no alias is a bare bill number', count(*) FROM gold.bill_alias
+  WHERE regexp_replace(alias, '[^a-z0-9]', '') RLIKE '^(hr|s|hjres|sjres|hconres|sconres|hres|sres)[0-9]{1,5}$'
+UNION ALL SELECT 'bill_alias is lower case and trimmed', count(*) FROM gold.bill_alias WHERE alias <> lower(trim(alias))
+UNION ALL SELECT 'bill_alias maps one big beautiful bill to 119 HR1', 1 - count(*) FROM gold.bill_alias
+  WHERE congress = 119 AND bill_key = 'HR1' AND alias = 'one big beautiful bill'
+UNION ALL SELECT 'filing_bill_alias unique key', count(*) - count(DISTINCT filing_uuid, issue_code, bill_key, alias) FROM gold.filing_bill_alias
+UNION ALL SELECT 'filing_bill_alias -> bill_alias', count(*) FROM gold.filing_bill_alias x
+  WHERE NOT EXISTS (SELECT 1 FROM gold.bill_alias a WHERE a.bill_key = x.bill_key AND a.alias = x.alias)
+UNION ALL SELECT 'filing_bill counts a filing once per issue code and bill', count(*) - count(DISTINCT filing_uuid, issue_code, bill_key) FROM gold.filing_bill
+UNION ALL SELECT 'bill_mention counts a filing once per issue code and bill', count(*) - count(DISTINCT filing_uuid, issue_code, bill_key) FROM gold.bill_mention
+UNION ALL SELECT 'bill_milestone_window unique key', count(*) - count(DISTINCT congress, bill_key, milestone) FROM gold.bill_milestone_window
+UNION ALL SELECT 'bill_milestone_window not_null key', count(*) FROM gold.bill_milestone_window WHERE congress IS NULL OR bill_key IS NULL OR milestone IS NULL
+UNION ALL SELECT 'bill_milestone_window milestone_date not_null', count(*) FROM gold.bill_milestone_window WHERE milestone_date IS NULL
+UNION ALL SELECT 'bill_milestone_window counts non-negative', count(*) FROM gold.bill_milestone_window
+  WHERE filings_90d_before < 0 OR income_90d_before < 0 OR clients_90d_before < 0
+     OR filings_90d_before IS NULL OR income_90d_before IS NULL OR clients_90d_before IS NULL
+UNION ALL SELECT 'bill_milestone_window one row per milestone', abs((SELECT count(*) FROM gold.bill_milestone) - (SELECT count(*) FROM gold.bill_milestone_window))
+UNION ALL SELECT 'bill_milestone_window -> bill_milestone', count(*) FROM gold.bill_milestone_window w
+  WHERE NOT EXISTS (SELECT 1 FROM gold.bill_milestone m WHERE m.congress = w.congress AND m.bill_key = w.bill_key AND m.milestone = w.milestone AND m.milestone_date = w.milestone_date)
+UNION ALL SELECT 'bill_milestone_window clients never exceed filings', count(*) FROM gold.bill_milestone_window WHERE clients_90d_before > filings_90d_before
 UNION ALL SELECT 'activity_text unique key', count(*) - count(DISTINCT filing_uuid, issue_code) FROM gold.activity_text
 UNION ALL SELECT 'activity_text not_null key', count(*) FROM gold.activity_text WHERE filing_uuid IS NULL OR issue_code IS NULL OR period_end_date IS NULL
 UNION ALL SELECT 'term unique key', count(*) - count(DISTINCT term) FROM gold.term
@@ -423,6 +446,9 @@ UNION ALL SELECT 'term is lower case', count(*) FROM gold.term WHERE term <> low
 UNION ALL SELECT 'engagement_bill key matches the bill pattern', count(*) FROM gold.engagement_bill
   WHERE bill_key NOT RLIKE '^(HR|S|HJRES|SJRES|HCONRES|SCONRES|HRES|SRES)[0-9]{1,5}$'
 UNION ALL SELECT 'engagement_bill labels not_null', count(*) FROM gold.engagement_bill WHERE bill_label IS NULL
+UNION ALL SELECT 'bill_alias key matches the bill pattern', count(*) FROM gold.bill_alias
+  WHERE bill_key NOT RLIKE '^(HR|S|HJRES|SJRES|HCONRES|SCONRES|HRES|SRES)[0-9]{1,5}$'
+UNION ALL SELECT 'bill_alias congress is the 118th or later', count(*) FROM gold.bill_alias WHERE congress < 118
 UNION ALL SELECT 'topic rank is 1..n', count(*) - count(DISTINCT rank)
   + sum(CASE WHEN rank < 1 THEN 1 ELSE 0 END) + greatest(max(rank) - count(*), 0) FROM gold.topic
 UNION ALL SELECT 'engagement not_null names', count(*) FROM gold.engagement

@@ -564,13 +564,117 @@ SELECT engagement_hk,
 FROM silver.sat_engagement_issues_text
 GROUP BY engagement_hk;
 
+-- bill_alias: the popular names a bill goes by, lower-cased, one row per
+-- congress, bill and alias. Two sources, stated once:
+--   a. Title short forms from sat_bill_detail (latest version per bill):
+--      the title with a leading "To ..." purpose clause removed when the
+--      title starts with "To " (the clause runs to its first sentence
+--      end, so a bill titled only by its purpose yields nothing), the
+--      trailing period dropped, whitespace collapsed, lower-cased, kept
+--      only when 6 to 80 characters long and, before lower-casing,
+--      starting with a capital letter or digit (a purpose clause cut at
+--      an abbreviation leaves a lower-case remnant, which is dropped). A
+--      title ending in "Act of <year>" also yields the form without the
+--      year. Official-form titles ("A bill to ...",
+--      "A resolution ...", "A joint resolution ...", "A concurrent
+--      resolution ...", "An act ...", "Providing for ...",
+--      "Expressing ...", "Reserved for the Speaker") are descriptions,
+--      not names, and give no alias.
+--   b. A curated list of the names the press and the filings use, mapped
+--      to the bills they mean in the 118th and 119th Congress. Only pairs
+--      known with confidence are listed, with the public law where there
+--      is one. Names whose bill predates the 118th Congress (secure 2.0,
+--      chips act, inflation reduction act, affordable care act: 117th or
+--      earlier) have no row because hub_bill starts at the 118th. "obbba"
+--      and the bare "ndaa" are left out: under six characters, the test
+--      floor, so the title words and the fiscal-year forms stand in. A
+--      curated alias below the floor is not filtered here; tests.sql
+--      reports it.
+-- Aliases are matched as substrings of lower(specific_issues)
+-- (filing_bill_alias), so no alias is a bare bill number and none is
+-- shorter than 6 characters (tests.sql).
+CREATE OR REPLACE TABLE gold.bill_alias AS
+WITH detail AS (
+  SELECT h.congress, h.bill_key, d.title
+  FROM silver.hub_bill h
+  JOIN (SELECT bill_hk, title FROM silver.sat_bill_detail
+        QUALIFY row_number() OVER (PARTITION BY bill_hk ORDER BY load_date DESC, hash_diff) = 1) d ON d.bill_hk = h.bill_hk
+  WHERE d.title IS NOT NULL
+    AND d.title NOT RLIKE '^(A bill |A resolution |A joint resolution |A concurrent resolution |An act |Providing for |Expressing |Reserved for )'),
+short_form AS (
+  SELECT congress, bill_key,
+         regexp_replace(regexp_replace(trim(CASE WHEN title LIKE 'To %' THEN regexp_replace(title, '^To .*?\\.(\\s+|$)', '') ELSE title END),
+                                       '\\s+', ' '), '\\.$', '') AS name
+  FROM detail),
+title_alias AS (
+  SELECT congress, bill_key, lower(name) AS alias FROM short_form WHERE name RLIKE '^[A-Z0-9]'
+  UNION ALL
+  SELECT congress, bill_key, lower(regexp_replace(name, ' of 20[0-9]{2}$', '')) FROM short_form WHERE name RLIKE '^[A-Z0-9].* Act of 20[0-9]{2}$'),
+curated AS (
+  SELECT congress, bill_key, alias FROM VALUES
+    -- One Big Beautiful Bill Act, 119th: H.R. 1, Public Law 119-21.
+    (119, 'HR1', 'one big beautiful bill'), (119, 'HR1', 'one, big, beautiful bill'), (119, 'HR1', 'big beautiful bill'),
+    -- NDAA, the bare name ("ndaa" is below the 6-character floor, so the words of the title stand in for it):
+    -- the House bills of the congress. 118th: FY2024 H.R. 2670 and FY2025 H.R. 8070. 119th: FY2026 H.R. 3838.
+    (118, 'HR2670', 'national defense authorization'), (118, 'HR8070', 'national defense authorization'),
+    (119, 'HR3838', 'national defense authorization'),
+    -- Farm bill, 118th: H.R. 8467, the Farm, Food, and National Security Act of 2024 (reported by House Agriculture).
+    (118, 'HR8467', 'farm bill'), (118, 'HR8467', 'farm, food, and national security act'),
+    -- TikTok ban, 118th: H.R. 7521, the Protecting Americans from Foreign Adversary Controlled Applications Act
+    -- (House-passed March 2024, enacted inside H.R. 815, P.L. 118-50).
+    (118, 'HR7521', 'tiktok ban'), (118, 'HR7521', 'tiktok divestiture'), (118, 'HR7521', 'tiktok bill'),
+    -- Laken Riley Act. 118th: H.R. 7511 (House-passed March 2024). 119th: H.R. 29 (House-passed January 2025)
+    -- and S. 5, Public Law 119-1.
+    (118, 'HR7511', 'laken riley act'), (119, 'HR29', 'laken riley act'), (119, 'S5', 'laken riley act'),
+    -- TAKE IT DOWN Act. 118th: S. 4569. 119th: S. 146, Public Law 119-12, and its House companion H.R. 633.
+    (118, 'S4569', 'take it down act'), (119, 'S146', 'take it down act'), (119, 'HR633', 'take it down act'),
+    -- GENIUS Act, 119th: S. 1582, Public Law 119-27, and S. 919, the first version reported by Senate Banking.
+    (119, 'S1582', 'genius act'), (119, 'S919', 'genius act'),
+    (119, 'S1582', 'guiding and establishing national innovation for u.s. stablecoins act'),
+    (119, 'S919', 'guiding and establishing national innovation for u.s. stablecoins act')
+  AS c(congress, bill_key, alias)),
+-- NDAA by fiscal year: the year-qualified names the filings use ("FY25 NDAA", "FY 2025 NDAA", "NDAA FY25", ...),
+-- one set per bill. 118th: FY2024 H.R. 2670 (P.L. 118-31) and S. 2226; FY2025 H.R. 8070 (House-passed), S. 4638
+-- (Senate) and H.R. 5009 (the enacted vehicle, P.L. 118-159). 119th: FY2026 H.R. 3838 (House-passed), S. 2296
+-- (Senate-passed) and S. 1071 (the enacted vehicle).
+curated_ndaa AS (
+  SELECT b.congress, b.bill_key,
+         replace(replace(n.pattern, '{yyyy}', CAST(b.fiscal_year AS STRING)), '{yy}', substr(CAST(b.fiscal_year AS STRING), 3, 2)) AS alias
+  FROM VALUES (118, 2024, 'HR2670'), (118, 2024, 'S2226'), (118, 2025, 'HR8070'), (118, 2025, 'S4638'), (118, 2025, 'HR5009'),
+              (119, 2026, 'HR3838'), (119, 2026, 'S2296'), (119, 2026, 'S1071') AS b(congress, fiscal_year, bill_key)
+  CROSS JOIN VALUES ('fy{yyyy} ndaa'), ('fy{yy} ndaa'), ('fy {yyyy} ndaa'), ('ndaa fy{yy}'), ('ndaa fy {yyyy}'),
+                    ('national defense authorization act for fiscal year {yyyy}') AS n(pattern))
+SELECT DISTINCT congress, upper(bill_key) AS bill_key, alias
+FROM (SELECT congress, bill_key, alias FROM title_alias WHERE length(alias) BETWEEN 6 AND 80
+      UNION ALL SELECT congress, bill_key, lower(trim(alias)) FROM curated
+      UNION ALL SELECT congress, bill_key, alias FROM curated_ndaa)
+WHERE regexp_replace(alias, '[^a-z0-9]', '') NOT RLIKE '^(hr|s|hjres|sjres|hconres|sconres|hres|sres)[0-9]{1,5}$';
+
+-- filing_bill_alias: the aliases found in the issue text, one row per
+-- filing, issue code, bill and alias. Rule: an alias counts as a mention
+-- of its bill only in the congress the filing belongs to (congress from
+-- the filing year, rule a of the bill section), matched as a substring of
+-- lower(specific_issues). Raw text matches over every version of the
+-- text; filing_bill applies rule 3 and folds them in with the numbers.
+CREATE OR REPLACE TABLE gold.filing_bill_alias AS
+WITH congress_of AS (
+  SELECT filing_uuid, CAST(floor((max(filing_year) - 1789) / 2) + 1 AS INT) AS congress
+  FROM silver.sat_engagement_filing GROUP BY filing_uuid)
+SELECT DISTINCT t.engagement_hk, t.filing_uuid, t.issue_code, a.bill_key, a.alias
+FROM silver.sat_engagement_issues_text t
+JOIN congress_of c ON c.filing_uuid = t.filing_uuid
+JOIN gold.bill_alias a ON a.congress = c.congress AND instr(lower(t.specific_issues), a.alias) > 0;
+
 -- filing_bill: bill numbers mentioned in the issue text (H.R. 1, S. 567,
--- H.J.Res. 12 ...), one row per filing, issue code and bill. A soft rule:
--- regex over free text, so it lives in Gold. bill_key is the normalized
--- form used for joins and search, bill_label is the display form. Only
--- registrations and the winning version of each quarterly report are
--- kept (rule 3), so a report and its amendment never count as two
--- filings. period_end_date is null only for a registration.
+-- H.J.Res. 12 ...) plus the popular names in bill_alias found there
+-- (filing_bill_alias), one row per filing, issue code and bill. A soft
+-- rule: regex over free text, so it lives in Gold. bill_key is the
+-- normalized form used for joins and search, bill_label is the display
+-- form. A filing that cites a bill by number and by name ("H.R. 1" and
+-- "one big beautiful bill") counts once. Only registrations and the
+-- winning version of each quarterly report are kept (rule 3), so a
+-- report and its amendment never count as two filings. period_end_date
+-- is null only for a registration.
 CREATE OR REPLACE TABLE gold.filing_bill AS
 WITH refs AS (
   SELECT t.engagement_hk, t.filing_uuid, t.issue_code,
@@ -578,6 +682,11 @@ WITH refs AS (
   FROM silver.sat_engagement_issues_text t
   LATERAL VIEW explode(regexp_extract_all(upper(t.specific_issues),
     '(?<!U\\.)\\b(?:H\\.?\\s?J\\.?\\s?RES\\.?|S\\.?\\s?J\\.?\\s?RES\\.?|H\\.?\\s?CON\\.?\\s?RES\\.?|S\\.?\\s?CON\\.?\\s?RES\\.?|H\\.?\\s?RES\\.?|S\\.?\\s?RES\\.?|H\\.?\\s?R\\.?|S\\.)\\s?\\d{1,5}\\b', 0)) AS raw_ref
+),
+mentions AS (
+  SELECT engagement_hk, filing_uuid, issue_code, bill_key FROM refs
+  UNION
+  SELECT engagement_hk, filing_uuid, issue_code, bill_key FROM gold.filing_bill_alias
 )
 SELECT DISTINCT r.engagement_hk, r.filing_uuid, r.issue_code, r.bill_key,
        CASE regexp_replace(r.bill_key, '[0-9]', '')
@@ -587,7 +696,7 @@ SELECT DISTINCT r.engagement_hk, r.filing_uuid, r.issue_code, r.bill_key,
          WHEN 'HRES' THEN 'H.Res. ' WHEN 'SRES' THEN 'S.Res. ' END
        || regexp_replace(r.bill_key, '[A-Z]', '') AS bill_label,
        f.period_end_date
-FROM refs r
+FROM mentions r
 LEFT JOIN gold.fact_filing f ON f.filing_uuid = r.filing_uuid
 WHERE f.filing_uuid IS NOT NULL
    OR EXISTS (SELECT 1 FROM silver.sat_engagement_filing s
@@ -783,12 +892,19 @@ GROUP BY issue_code, bill_key;
 --   c. Milestones come from the Congress.gov actions by action code and
 --      text, the earliest date for each: introduced (1000, 10000,
 --      Intro-H, Intro-S, "Introduced in ..."), reported (5000, 14000,
---      H12200, H12210, "Reported ..."), passed_house (8000, H37300,
+--      H12200, H12210, "Reported by/to/(Amended) ...", "Committee on
+--      ... Reported by Senator ..."), passed_house (8000, H37300,
 --      H37100, H38310, "Passed/agreed to in House", "On passage Passed",
---      "On motion to suspend the rules and pass ... Agreed to"),
---      passed_senate (17000, "Passed/agreed to in Senate", "Passed
---      Senate"), to_president (28000, E30000, "Presented to President"),
---      became_law (36000, E40000, "Became Public Law").
+--      "On motion to suspend the rules and pass/agree ... Agreed to",
+--      "On agreeing to the resolution ... Agreed to", for a House
+--      resolution, which is agreed to rather than passed), passed_senate
+--      (17000, "Passed/agreed to in Senate", "Passed Senate", "Resolution
+--      agreed to in Senate", the Senate's form for a resolution),
+--      to_president (28000, E30000, "Presented to President"),
+--      became_law (36000, E40000, "Became Public Law", "Signed by
+--      President", the E40000 text: a signed bill is law). Text patterns
+--      are anchored at the start because Congress.gov puts the summary
+--      action first ("Passed/agreed to in House: On passage ...").
 --   d. stage reads the milestones: law when it became law (or Congress.gov
 --      says is_law), passed both when both chambers passed it, passed one
 --      chamber, in committee when a committee reported it, else introduced.
@@ -825,10 +941,10 @@ JOIN LATERAL (SELECT
   CASE WHEN a.action_code IN ('1000', '10000', 'Intro-H', 'Intro-S') OR a.text RLIKE '^Introduced in (the )?(House|Senate)' THEN 'introduced'
        WHEN a.action_code IN ('5000', '14000', 'H12200', 'H12210') OR a.text RLIKE '^(Reported (by|to|\\()|Committee on [^.]*\\. Reported)' THEN 'reported'
        WHEN a.action_code IN ('8000', 'H37300', 'H37100', 'H38310')
-            OR a.text RLIKE '^(Passed/agreed to in House|On passage Passed|On motion to suspend the rules and pass.*Agreed to|Passed House)' THEN 'passed_house'
-       WHEN a.action_code = '17000' OR a.text RLIKE '^(Passed/agreed to in Senate|Passed Senate)' THEN 'passed_senate'
+            OR a.text RLIKE '^(Passed/agreed to in House|On passage Passed|On motion to suspend the rules and (pass|agree).*Agreed to|On agreeing to the resolution.*Agreed to|Passed House)' THEN 'passed_house'
+       WHEN a.action_code = '17000' OR a.text RLIKE '^(Passed/agreed to in Senate|Passed Senate|Resolution agreed to in Senate)' THEN 'passed_senate'
        WHEN a.action_code IN ('28000', 'E30000') OR a.text RLIKE '^Presented to President' THEN 'to_president'
-       WHEN a.action_code IN ('36000', 'E40000') OR a.text RLIKE '^Became Public Law' THEN 'became_law' END AS milestone) t
+       WHEN a.action_code IN ('36000', 'E40000') OR a.text RLIKE '^(Became Public Law|Signed by President)' THEN 'became_law' END AS milestone) t
 WHERE t.milestone IS NOT NULL AND a.action_date IS NOT NULL
 GROUP BY h.congress, h.bill_key, t.milestone;
 
@@ -879,6 +995,27 @@ SELECT m.congress, m.bill_key, m.engagement_hk, g.client_id, g.client, g.registr
 FROM gold.bill_mention m
 JOIN gold.engagement g ON g.engagement_hk = m.engagement_hk
 GROUP BY m.congress, m.bill_key, m.engagement_hk, g.client_id, g.client, g.registrant_id, g.firm;
+
+-- bill_milestone_window: the lobbying in the 90 days before each
+-- milestone, one row per bill and milestone (zeros when nothing fell in
+-- the window). Rule: a filing counts when its period_end_date is after
+-- milestone_date - 90 days and on or before milestone_date; it counts
+-- once and its income once (rule b) however many issue codes cite the
+-- bill; clients are the distinct client records behind those filings.
+-- Registrations have no period and never fall in a window.
+CREATE OR REPLACE TABLE gold.bill_milestone_window AS
+WITH filing AS (
+  SELECT DISTINCT m.congress, m.bill_key, m.filing_uuid, f.period_end_date, f.income, f.client_hk
+  FROM gold.bill_mention m
+  JOIN gold.fact_filing f ON f.filing_uuid = m.filing_uuid)
+SELECT b.congress, b.bill_key, b.milestone, b.milestone_date,
+       CAST(count(x.filing_uuid) AS INT) AS filings_90d_before,
+       CAST(coalesce(sum(x.income), 0) AS DECIMAL(14,2)) AS income_90d_before,
+       CAST(count(DISTINCT x.client_hk) AS INT) AS clients_90d_before
+FROM gold.bill_milestone b
+LEFT JOIN filing x ON x.congress = b.congress AND x.bill_key = b.bill_key
+  AND x.period_end_date > date_sub(b.milestone_date, 90) AND x.period_end_date <= b.milestone_date
+GROUP BY b.congress, b.bill_key, b.milestone, b.milestone_date;
 
 -- client: one row per client with the firms it hired and its totals.
 -- organization_hk and organization_name attach the organization behind

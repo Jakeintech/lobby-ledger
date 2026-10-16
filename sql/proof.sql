@@ -52,6 +52,8 @@ UNION ALL SELECT 'engagement', count(*) FROM gold.engagement
 UNION ALL SELECT 'engagement_bill', count(*) FROM gold.engagement_bill
 UNION ALL SELECT 'engagement_ai_summary', count(*) FROM gold.engagement_ai_summary
 UNION ALL SELECT 'filing_bill', count(*) FROM gold.filing_bill
+UNION ALL SELECT 'bill_alias', count(*) FROM gold.bill_alias
+UNION ALL SELECT 'filing_bill_alias', count(*) FROM gold.filing_bill_alias
 UNION ALL SELECT 'topic', count(*) FROM gold.topic
 UNION ALL SELECT 'topic_quarter', count(*) FROM gold.topic_quarter
 UNION ALL SELECT 'topic_client', count(*) FROM gold.topic_client
@@ -63,6 +65,7 @@ UNION ALL SELECT 'bill_detail', count(*) FROM gold.bill_detail
 UNION ALL SELECT 'bill_milestone', count(*) FROM gold.bill_milestone
 UNION ALL SELECT 'bill_quarter', count(*) FROM gold.bill_quarter
 UNION ALL SELECT 'bill_engagement', count(*) FROM gold.bill_engagement
+UNION ALL SELECT 'bill_milestone_window', count(*) FROM gold.bill_milestone_window
 UNION ALL SELECT 'client', count(*) FROM gold.client
 UNION ALL SELECT 'client_quarter', count(*) FROM gold.client_quarter
 UNION ALL SELECT 'firm', count(*) FROM gold.firm
@@ -117,7 +120,9 @@ UNION ALL SELECT 'revolving_door', count(*) > 0 FROM gold.revolving_door
 UNION ALL SELECT 'foreign_country', count(*) > 0 FROM gold.foreign_country
 UNION ALL SELECT 'bill_congress', count(*) > 0 FROM gold.bill_congress
 UNION ALL SELECT 'bill_detail', count(*) > 0 FROM gold.bill_detail
-UNION ALL SELECT 'bill_milestone', count(*) > 0 FROM gold.bill_milestone;
+UNION ALL SELECT 'bill_milestone', count(*) > 0 FROM gold.bill_milestone
+UNION ALL SELECT 'bill_alias', count(*) > 0 FROM gold.bill_alias
+UNION ALL SELECT 'bill_milestone_window', count(*) > 0 FROM gold.bill_milestone_window;
 
 -- 8. Revolving door by confidence, as disclosed by the lobbyist.
 SELECT kind, confidence, count(*) AS affiliations, count(DISTINCT lobbyist_id) AS lobbyists
@@ -197,3 +202,23 @@ JOIN gold.fact_filing t ON t.engagement_hk = q.engagement_hk AND t.is_terminatio
 WHERE date_trunc('QUARTER', q.period_end_date) > date_trunc('QUARTER', t.period_end_date)
   AND NOT EXISTS (SELECT 1 FROM silver.sat_engagement_filing r
                   WHERE r.engagement_hk = q.engagement_hk AND r.filing_type IN ('RR', 'RA') AND r.dt_posted > t.dt_posted);
+
+-- 17. Popular-name aliases: how many names, how many bills carry one,
+--     and how many filings they reach. Title aliases are empty until the
+--     Congress.gov pull lands; the curated rows are there from the start.
+SELECT count(*) AS aliases, count(DISTINCT congress, bill_key) AS bills_with_alias,
+       sum(CASE WHEN alias RLIKE ' act( of 20[0-9]{2})?$' THEN 1 ELSE 0 END) AS aliases_ending_in_act
+FROM gold.bill_alias;
+
+SELECT count(*) AS alias_hits, count(DISTINCT filing_uuid) AS filings_matched_by_alias,
+       count(DISTINCT congress_bill) AS bills_matched_by_alias
+FROM (SELECT filing_uuid, concat(bill_key, '|', alias) AS congress_bill FROM gold.filing_bill_alias);
+
+SELECT alias, bill_key, count(DISTINCT filing_uuid) AS filings
+FROM gold.filing_bill_alias GROUP BY alias, bill_key ORDER BY filings DESC LIMIT 10;
+
+-- 18. Lobbying before milestones: windows per milestone and what fell in
+--     them. Empty until the Congress.gov pull lands.
+SELECT milestone, count(*) AS windows, sum(filings_90d_before) AS filings,
+       sum(income_90d_before) AS income, max(clients_90d_before) AS most_clients
+FROM gold.bill_milestone_window GROUP BY milestone ORDER BY milestone;
