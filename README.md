@@ -47,7 +47,8 @@ Hard rules stop at Silver and soft rules start at Gold. Every Silver insert is g
 | Trends | `/trends`, `/trend/tariff` | Any phrase as filings and income by quarter; curated terms |
 | Foreign | `/foreign`, `/foreign/Japan` | Foreign-linked lobbying by country and quarter |
 | Lobbied | `/lobbied`, `/lobbied/:id` | Government entities contacted, by issue and client |
-| Client | `/client/63876` | Firms hired, income by quarter, issues, bills, entities contacted, lobbyists |
+| Client | `/client/63876` | Firms hired, income by quarter, issues, bills, entities contacted, lobbyists, filing timing, peer rank |
+| Organization | `/organization/:id` | One organization across every firm it hires, with its clients and firms |
 | Firm | `/firm/682` | Clients by income, income by quarter, issue mix, roster |
 | Lobbyist | `/lobbyist/68995` | Clients and firms, quarters active, disclosed former positions and matches |
 | Revolving door | `/revolving-door` | Lobbyists who lobby the body they disclosed working for |
@@ -59,8 +60,8 @@ Hard rules stop at Silver and soft rules start at Gold. Every Silver insert is g
 |---|---|---|
 | Bronze | `bronze.landing` (volume) | Landing zone for the CSVs |
 | Bronze | `lda_filings`, `lda_registrants`, `lda_clients`, `lda_lobbyists`, `lda_lobbying_activities`, `lda_government_entities`, `lda_foreign_entities`, `lda_affiliated_organizations` | Lobbying filings as delivered plus two lineage columns |
-| Bronze | `congress_bills`, `congress_bill_actions`, `ref_legislators`, `ref_committees` | Bill details and actions from Congress.gov; legislators and committees from the unitedstates project |
-| Silver | `hub_registrant`, `hub_client`, `hub_lobbyist`, `hub_issue`, `hub_government_entity`, `hub_foreign_entity`, `hub_bill`, `hub_legislator`, `hub_committee` | One row per business key; `*_hk = md5(upper(trim(bk)))` |
+| Bronze | `congress_bills`, `congress_bill_actions`, `ref_legislators`, `ref_committees`, `ref_issue_committees`, `ref_countries` | Bill details and actions from Congress.gov; legislators and committees from the unitedstates project; curated issue-to-committee map; country names |
+| Silver | `hub_registrant`, `hub_client`, `hub_organization`, `hub_lobbyist`, `hub_issue`, `hub_government_entity`, `hub_foreign_entity`, `hub_bill`, `hub_legislator`, `hub_committee` | One row per business key; `*_hk = md5(upper(trim(bk)))` |
 | Silver | `link_engagement` | One registrant working for one client; hash of both keys |
 | Silver | `link_engagement_lobbyist`, `link_engagement_issue`, `link_engagement_government_entity`, `link_engagement_foreign_entity`, `link_engagement_affiliated_organization` | What an engagement has touched |
 | Silver | `sat_engagement_filing` | One row per quarterly filing, guarded by `hash_diff` |
@@ -74,9 +75,15 @@ Hard rules stop at Silver and soft rules start at Gold. Every Silver insert is g
 | Gold | `foreign_country`, `foreign_country_quarter`, `foreign_country_client` | Foreign-funded lobbying |
 | Gold | `government_entity`, `government_entity_quarter`, `government_entity_issue`, `government_entity_client` | Who gets lobbied |
 | Gold | `lobbyist`, `lobbyist_engagement`, `lobbyist_position`, `lobbyist_affiliation`, `revolving_door` | Lobbyist pages and the revolving door |
-| Gold | `client`, `client_quarter`, `firm`, `firm_quarter`, `search_entity`, `issue_name` | Client and firm pages, search |
+| Gold | `client`, `client_quarter`, `firm`, `firm_quarter`, `search_entity`, `issue_name`, `country_name` | Client and firm pages, search, display names |
+| Gold | `organization`, `organization_quarter`, `organization_firm` | One organization across every firm it hires; LDA client ids are per registrant, so names are normalized to resolve them |
+| Gold | `issue_committee` | Which standing committees hold jurisdiction over each issue code (curated), used for the revolving-door jurisdiction match |
+| Gold | `surge` | Quarterly income z-scores per client, firm and issue against their prior quarters; a surge is two standard deviations or more |
+| Gold | `filing_timing` | Each report against its 20-day deadline (weekends and the MLK holiday observed), days late, posting weekday and hour in Eastern time |
+| Gold | `peer_rank` | Percentile of each client and firm within an issue code |
+| Gold | `edge` | Client-firm, engagement-bill and lobbyist-engagement edges for graph views |
 | Gold | `engagement_ai_summary` | Optional one-sentence summaries; empty unless `sql/ai_summaries.sql` is run |
-| Tests | `sql/tests.sql` | One statement, one row of zeros when healthy: unique keys, link-to-hub references, one version per `hash_diff`, bill pattern, no null income, status and matching rules |
+| Tests | `sql/tests.sql` | One statement, one row of zeros when healthy; 286 assertions: unique keys, link-to-hub references, one version per `hash_diff`, bill pattern, no null income, status, matching, timing and ranking rules |
 | Grants | `sql/grants.sql` | USE CATALOG, USE SCHEMA and SELECT on Gold for the two app principals, nothing else |
 
 Rules stated once in `sql/lakehouse.sql`: a filing's income counts in full toward every issue code, bill, term and entity it lists, so those totals overlap and are never summed across pages; registrations carry no income; the latest amendment for an engagement and period wins; an engagement is lapsed when its last quarterly report was a termination or it stopped filing before the newest quarter in the data; null income means zero; the congress of a bill is inferred from the filing year (2024 is the 118th, 2025 the 119th).
